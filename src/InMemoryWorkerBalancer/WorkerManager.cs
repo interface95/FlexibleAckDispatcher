@@ -84,7 +84,7 @@ public sealed class WorkerManager<T>
 
         var processor = new WorkerProcessor<T>(endpoint, endpoint.Channel.Reader, handler, this);
         processor.Start();
-        WorkerAdded?.Invoke(endpoint);
+        RaiseWorkerAdded(endpoint);
         _availableWorkers.Writer.TryWrite(endpoint);
         _logger.LogInformation("Worker {WorkerId} added", endpoint.Id);
         return endpoint;
@@ -173,7 +173,7 @@ public sealed class WorkerManager<T>
 
         await endpoint.WaitForCompletionAsync().ConfigureAwait(false);
 
-        WorkerRemoved?.Invoke(endpoint);
+        RaiseWorkerRemoved(endpoint);
         _logger.LogInformation("Worker {WorkerId} removed", endpoint.Id);
         return true;
     }
@@ -292,6 +292,54 @@ public sealed class WorkerManager<T>
             lock (_lock)
             {
                 return _workers.Count;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 安全触发 WorkerAdded 事件，捕获订阅者抛出的异常。
+    /// </summary>
+    private void RaiseWorkerAdded(WorkerEndpoint<T> endpoint)
+    {
+        var handlers = WorkerAdded;
+        if (handlers == null)
+        {
+            return;
+        }
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<WorkerEndpoint<T>>)handler).Invoke(endpoint);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception occurred in WorkerAdded event handler for Worker {WorkerId}", endpoint.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 安全触发 WorkerRemoved 事件，捕获订阅者抛出的异常。
+    /// </summary>
+    private void RaiseWorkerRemoved(WorkerEndpoint<T> endpoint)
+    {
+        var handlers = WorkerRemoved;
+        if (handlers == null)
+        {
+            return;
+        }
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<WorkerEndpoint<T>>)handler).Invoke(endpoint);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception occurred in WorkerRemoved event handler for Worker {WorkerId}", endpoint.Id);
             }
         }
     }
