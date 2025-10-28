@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using InMemoryWorkerBalancer.Abstractions;
@@ -9,33 +10,54 @@ namespace InMemoryWorkerBalancer;
 /// <summary>
 /// 发布-订阅管理器，负责调度消息并维护 Worker。
 /// </summary>
-public sealed class PubSubManager<T> : IPubSubManager<T>
+public sealed class PubSubManager : IPubSubManager
 {
-    private readonly Channel<T> _channel;
-    private readonly PubSubChannel _pubChannel;
-    private readonly WorkerManager<T> _workerManager;
-    private readonly WorkerDispatcher<T> _dispatcher = new();
+    private readonly Channel<ReadOnlyMemory<byte>> _channel;
+    private readonly WorkerManager _workerManager;
+    private readonly WorkerDispatcher _dispatcher = new();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly ConcurrentDictionary<int, PubSubSubscription> _subscriptions = new();
+    private readonly ConcurrentDictionary<Type, object> _typedChannels = new();
     private readonly ILogger _logger;
+    private readonly IWorkerPayloadSerializer _serializer;
     private readonly Task _dispatchTask;
     private int _disposed;
 
     /// <summary>
-    /// 初始化发布订阅管理器。
+    /// 使用选项回调创建 <see cref="PubSubManager"/>。
     /// </summary>
-    public PubSubManager(ILogger? logger = null)
+    public static PubSubManager Create(Action<PubSubManagerOptions>? configure = null)
     {
-        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+        var options = new PubSubManagerOptions();
+        configure?.Invoke(options);
+        options.Validate();
+        return new PubSubManager(options);
+    }
 
-        _channel = System.Threading.Channels.Channel.CreateUnbounded<T>(new UnboundedChannelOptions
+    internal PubSubManager(PubSubManagerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        _serializer = options.Serializer;
+        _logger = options.Logger;
+
+        _channel = System.Threading.Channels.Channel.CreateUnbounded<ReadOnlyMemory<byte>>(new UnboundedChannelOptions
         {
             SingleReader = false,
             SingleWriter = false
         });
 
-        _pubChannel = new PubSubChannel(_channel.Writer);
-        _workerManager = WorkerManagerFactory.CreateManager<T>(_cancellation.Token, _logger);
+        _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger);
+        foreach (var handler in options.WorkerAddedHandlers)
+        {
+            _workerManager.WorkerAdded += handler;
+        }
+
+        foreach (var handler in options.WorkerRemovedHandlers)
+        {
+            _workerManager.WorkerRemoved += handler;
+        }
+
         _dispatchTask = Task.Factory.StartNew(
                 () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
                 CancellationToken.None,
@@ -45,32 +67,49 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
     }
 
     /// <summary>
-    /// 对外暴露的发布通道。
-    /// </summary>
-    public IPubSubChannel<T> Channel => _pubChannel;
-
-    /// <summary>
     /// 当前订阅数量。
     /// </summary>
     public int SubscriberCount => _subscriptions.Count;
 
     /// <summary>
-    /// 注册一个新的订阅者。
+    /// 当前空闲 Worker 数量。
     /// </summary>
-    public async ValueTask<IPubSubSubscription> SubscribeAsync(WorkerProcessingDelegate<T> handler,
-        CancellationToken cancellationToken = default)
+    public int IdleWorkerCount => _workerManager.AvailableWorkerCount;
+
+    /// <summary>
+    /// 当前执行中的任务数量（所有 Worker 总和）。
+    /// </summary>
+    public int RunningTaskCount => _workerManager.InFlightCount;
+
+    /// <summary>
+    /// 获取当前所有 Worker 端点的快照。
+    /// </summary>
+    public IReadOnlyList<WorkerEndpointSnapshot> GetSnapshot()
     {
-        return await SubscribeAsync(handler, null, cancellationToken);
+        return _workerManager.GetSnapshot();
     }
 
     /// <summary>
-    /// 注册一个新的订阅者
+    /// 直接发布一条消息。
     /// </summary>
-    /// <param name="handler"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentNullException"></exception>
-    public ValueTask<IPubSubSubscription> SubscribeAsync(IWorkerMessageHandler<T> handler,
+    public ValueTask PublishAsync<T>(T message, CancellationToken cancellationToken = default)
+    {
+        return Channel<T>().PublishAsync(message, cancellationToken);
+    }
+
+    /// <summary>
+    /// 注册一个新的订阅者。
+    /// </summary>
+    public ValueTask<IPubSubSubscription> SubscribeAsync<T>(WorkerProcessingDelegate<T> handler,
+        CancellationToken cancellationToken = default)
+    {
+        return SubscribeAsync(handler, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// 注册一个新的订阅者。
+    /// </summary>
+    public ValueTask<IPubSubSubscription> SubscribeAsync<T>(IWorkerMessageHandler<T> handler,
         CancellationToken cancellationToken = default)
     {
         if (handler is null)
@@ -78,18 +117,13 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
             throw new ArgumentNullException(nameof(handler));
         }
 
-        return SubscribeAsync(handler.HandleAsync, null, cancellationToken);
+        return SubscribeAsync<T>(handler.HandleAsync, null, cancellationToken);
     }
 
     /// <summary>
     /// 注册一个新的订阅者。
     /// </summary>
-    /// <param name="handler"></param>
-    /// <param name="configure"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    /// <exception cref="InvalidOperationException"></exception>
-    public async ValueTask<IPubSubSubscription> SubscribeAsync(
+    public async ValueTask<IPubSubSubscription> SubscribeAsync<T>(
         WorkerProcessingDelegate<T> handler,
         Action<SubscriptionOptions>? configure,
         CancellationToken cancellationToken = default)
@@ -99,7 +133,7 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
         var options = SubscriptionOptions.Create();
         configure?.Invoke(options);
 
-        var endpoint = _workerManager.AddWorker(handler, options);
+        var endpoint = _workerManager.AddWorker(CreateHandler(handler), options);
         var subscription = new PubSubSubscription(this, endpoint.Id);
 
         if (!_subscriptions.TryAdd(subscription.Id, subscription))
@@ -113,14 +147,9 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
     }
 
     /// <summary>
-    /// 注册一个新的订阅者
+    /// 注册一个新的订阅者。
     /// </summary>
-    /// <param name="handler"></param>
-    /// <param name="configure"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    /// <exception cref="ArgumentNullException"></exception>
-    public ValueTask<IPubSubSubscription> SubscribeAsync(
+    public ValueTask<IPubSubSubscription> SubscribeAsync<T>(
         IWorkerMessageHandler<T> handler,
         Action<SubscriptionOptions>? configure,
         CancellationToken cancellationToken = default)
@@ -130,7 +159,7 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
             throw new ArgumentNullException(nameof(handler));
         }
 
-        return SubscribeAsync(handler.HandleAsync, configure, cancellationToken);
+        return SubscribeAsync<T>(handler.HandleAsync, configure, cancellationToken);
     }
 
     /// <summary>
@@ -178,66 +207,28 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
         throw new InvalidOperationException($"未找到待确认的消息，deliveryTag={deliveryTag}");
     }
 
-    private async Task RemoveSubscriptionAsync(int subscriptionId)
+    private WorkerProcessingDelegate CreateHandler<T>(WorkerProcessingDelegate<T> handler)
     {
-        if (!_subscriptions.TryRemove(subscriptionId, out _))
+        return async (context, cancellationToken) =>
         {
-            return;
-        }
-
-        var removed = await _workerManager.RemoveWorkerAsync(subscriptionId).ConfigureAwait(false);
-        if (!removed)
-        {
-            _subscriptions[subscriptionId] = new PubSubSubscription(this, subscriptionId);
-            _logger.LogWarning("Failed to remove worker for subscription {SubscriptionId}; subscription restored", subscriptionId);
-            return;
-        }
-
-        _logger.LogInformation("Subscription {SubscriptionId} removed", subscriptionId);
+            var payload = _serializer.Deserialize<T>(context.Payload);
+            var typedMessage = new WorkerMessage<T>(context, payload);
+            await handler(typedMessage, cancellationToken).ConfigureAwait(false);
+        };
     }
 
-    /// <summary>
-    /// 内部发布通道实现。
-    /// </summary>
-    private sealed class PubSubChannel : IPubSubChannel<T>
+    private IPubSubChannel<T> Channel<T>()
     {
-        private readonly ChannelWriter<T> _writer;
-
-        public PubSubChannel(ChannelWriter<T> writer)
-        {
-            _writer = writer;
-        }
-
-        public ValueTask PublishAsync(T message, CancellationToken cancellationToken = default)
-        {
-            return _writer.WriteAsync(message, cancellationToken);
-        }
+        return (IPubSubChannel<T>)_typedChannels.GetOrAdd(typeof(T),
+            _ => new TypedPubSubChannel<T>(_channel.Writer, _serializer));
     }
 
-    /// <summary>
-    /// 内部订阅句柄，实现释放逻辑。
-    /// </summary>
-    private sealed class PubSubSubscription : IPubSubSubscription
+    internal async Task RemoveSubscriptionAsync(int subscriptionId)
     {
-        private readonly PubSubManager<T> _owner;
-        private int _disposed;
-
-        public PubSubSubscription(PubSubManager<T> owner, int id)
+        if (_subscriptions.TryRemove(subscriptionId, out _))
         {
-            _owner = owner;
-            Id = id;
-        }
-
-        public int Id { get; }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            {
-                return;
-            }
-
-            await _owner.RemoveSubscriptionAsync(Id).ConfigureAwait(false);
+            await _workerManager.RemoveWorkerAsync(subscriptionId).ConfigureAwait(false);
+            _logger.LogInformation("Subscription {SubscriptionId} removed", subscriptionId);
         }
     }
 }

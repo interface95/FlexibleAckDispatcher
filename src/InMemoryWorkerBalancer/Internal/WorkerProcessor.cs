@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Channels;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer.Internal;
@@ -7,18 +10,18 @@ namespace InMemoryWorkerBalancer.Internal;
 /// <summary>
 /// Worker 的处理器：从专属通道读取消息并调用处理委托。
 /// </summary>
-internal sealed class WorkerProcessor<T>
+internal sealed class WorkerProcessor
 {
-    private readonly WorkerEndpoint<T> _endpoint;
-    private readonly ChannelReader<T> _reader;
-    private readonly WorkerProcessingDelegate<T> _handler;
-    private readonly WorkerManager<T> _workerManager;
+    private readonly WorkerEndpoint _endpoint;
+    private readonly ChannelReader<ReadOnlyMemory<byte>> _reader;
+    private readonly WorkerProcessingDelegate _handler;
+    private readonly WorkerManager _workerManager;
 
     public WorkerProcessor(
-        WorkerEndpoint<T> endpoint,
-        ChannelReader<T> reader,
-        WorkerProcessingDelegate<T> handler,
-        WorkerManager<T> workerManager)
+        WorkerEndpoint endpoint,
+        ChannelReader<ReadOnlyMemory<byte>> reader,
+        WorkerProcessingDelegate handler,
+        WorkerManager workerManager)
     {
         _endpoint = endpoint;
         _reader = reader;
@@ -109,7 +112,7 @@ internal sealed class WorkerProcessor<T>
             {
                 while (!isStopped() && _reader.TryRead(out var payload))
                 {
-                    WorkerAckToken<T>? token = null;
+                    WorkerAckToken? token = null;
                     try
                     {
                         token = await _workerManager.RegisterInFlightAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
@@ -145,13 +148,14 @@ internal sealed class WorkerProcessor<T>
         }
     }
 
-    private async Task ExecuteWithTimeoutAsync(WorkerAckToken<T> token, CancellationToken outerCancellationToken)
+    private async Task ExecuteWithTimeoutAsync(WorkerAckToken token, CancellationToken outerCancellationToken)
     {
         using var scope = ReusableTimeoutScope.Rent(outerCancellationToken, _endpoint.HandlerTimeout, out var linkedToken);
 
         try
         {
-            await _handler(new WorkerMessage<T>(token, _workerManager.TryAck), linkedToken).ConfigureAwait(false);
+            var context = new WorkerDeliveryContext(token, _workerManager.TryAck);
+            await _handler(context, linkedToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!outerCancellationToken.IsCancellationRequested && linkedToken.IsCancellationRequested)
         {

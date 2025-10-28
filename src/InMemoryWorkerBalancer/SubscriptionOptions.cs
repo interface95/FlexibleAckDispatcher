@@ -76,14 +76,14 @@ public sealed class SubscriptionOptions
     /// </summary>
     public SubscriptionOptions WithConcurrencyLimit(int limit)
     {
-        if (limit <= 0)
+        switch (limit)
         {
-            throw new ArgumentOutOfRangeException(nameof(limit), "Concurrency limit must be greater than zero.");
-        }
-
-        if (limit > MaxConcurrencyLimit)
-        {
-            throw new ArgumentOutOfRangeException(nameof(limit), $"Concurrency limit cannot exceed {MaxConcurrencyLimit}.");
+            // 更严格的上限
+            case <= 0 or > 100:
+                throw new ArgumentOutOfRangeException(nameof(limit), 
+                    "Concurrency limit must be between 1 and 100.");
+            case > MaxConcurrencyLimit:
+                throw new ArgumentOutOfRangeException(nameof(limit), $"Concurrency limit cannot exceed {MaxConcurrencyLimit}.");
         }
 
         if (limit > Prefetch)

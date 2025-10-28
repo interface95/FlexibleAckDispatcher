@@ -1,15 +1,15 @@
 using System.Threading.Channels;
 
-namespace InMemoryWorkerBalancer;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 表示一个 Worker 的运行时上下文，包含专属队列、运行任务等信息。
 /// </summary>
-public sealed class WorkerEndpoint<T>
+internal sealed class WorkerEndpoint
 {
     private Task? _runningTask;
 
-    public WorkerEndpoint(int id, Channel<T> channel, CancellationTokenSource cancellation, WorkerCapacity capacity)
+    public WorkerEndpoint(int id, Channel<ReadOnlyMemory<byte>> channel, CancellationTokenSource cancellation, WorkerCapacity capacity)
     {
         Id = id;
         Channel = channel;
@@ -25,17 +25,17 @@ public sealed class WorkerEndpoint<T>
     /// <summary>
     /// Worker 专属的消息通道，调度器往里面写入业务消息。
     /// </summary>
-    public Channel<T> Channel { get; }
+    internal Channel<ReadOnlyMemory<byte>> Channel { get; }
 
     /// <summary>
     /// 写端便捷访问器，调度器直接通过此 Writer 推送消息。
     /// </summary>
-    public ChannelWriter<T> Writer => Channel.Writer;
+    internal ChannelWriter<ReadOnlyMemory<byte>> Writer => Channel.Writer;
 
     /// <summary>
     /// 控制 Worker 生命周期的取消源，移除或 Dispose 时会触发取消。
     /// </summary>
-    public CancellationTokenSource Cancellation { get; }
+    internal CancellationTokenSource Cancellation { get; }
 
     /// <summary>
     /// Worker 的并发容量控制器，限制同一时间执行的消息数量。
@@ -94,6 +94,19 @@ public sealed class WorkerEndpoint<T>
         {
             Fault = ex;
         }
+    }
+
+    internal WorkerEndpointSnapshot CreateSnapshot()
+    {
+        return new WorkerEndpointSnapshot(
+            Id,
+            Name,
+            IsActive,
+            Capacity.MaxConnections,
+            Capacity.CurrentConnections,
+            HandlerTimeout,
+            FailureThreshold,
+            Fault);
     }
 }
 

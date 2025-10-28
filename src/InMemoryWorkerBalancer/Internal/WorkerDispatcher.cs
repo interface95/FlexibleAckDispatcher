@@ -1,19 +1,18 @@
 using System.Threading.Channels;
-using InMemoryWorkerBalancer.Internal;
 
-namespace InMemoryWorkerBalancer;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 负责从主通道读取消息并分配给可用 Worker。
 /// </summary>
-public sealed class WorkerDispatcher<T>
+internal sealed class WorkerDispatcher
 {
     /// <summary>
     /// 调度循环，从 sourceReader 读取消息并写入 Worker 专属队列。
     /// </summary>
     public async Task ProcessAsync(
-        ChannelReader<T> sourceReader,
-        WorkerManager<T> workerManager,
+        ChannelReader<ReadOnlyMemory<byte>> sourceReader,
+        WorkerManager workerManager,
         CancellationToken cancellationToken)
     {
         try

@@ -1,50 +1,56 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using InMemoryWorkerBalancer.Internal;
 using Microsoft.Extensions.Logging;
 
-namespace InMemoryWorkerBalancer;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 管理 Worker 生命周期与消息调度的核心类。
 /// </summary>
-public sealed class WorkerManager<T>
+internal sealed class WorkerManager
 {
     private readonly object _lock = new();
-    private readonly List<WorkerEndpoint<T>> _workers = new();
-    private readonly Dictionary<int, WorkerEndpoint<T>> _workerMap = new();
-    private readonly ConcurrentDictionary<long, WorkerAckToken<T>> _inFlight = new();
-    private readonly Channel<WorkerEndpoint<T>> _availableWorkers;
+    private readonly List<WorkerEndpoint> _workers = new();
+    private readonly Dictionary<int, WorkerEndpoint> _workerMap = new();
+    private readonly ConcurrentDictionary<long, WorkerAckToken> _inFlight = new();
+    private readonly Channel<WorkerEndpoint> _availableWorkers;
     private readonly CancellationToken _globalToken;
     private readonly ILogger _logger;
     private int _workerIdSeed;
+    private int _availableWorkerCount;
 
     internal ILogger Logger => _logger;
 
     /// <summary>
     /// Worker 添加事件（异步）。
     /// </summary>
-    public event Func<WorkerEndpoint<T>, Task>? WorkerAdded;
+    internal event Func<WorkerEndpointSnapshot, Task>? WorkerAdded;
 
     /// <summary>
     /// Worker 移除事件（异步）。
     /// </summary>
-    public event Func<WorkerEndpoint<T>, Task>? WorkerRemoved;
+    internal event Func<WorkerEndpointSnapshot, Task>? WorkerRemoved;
+    
+   /// <summary>
+    /// 当前空闲 Worker 数量。
+    /// </summary>
+    internal int AvailableWorkerCount => Math.Max(Volatile.Read(ref _availableWorkerCount), 0);
 
-    public void ClearEventHandlers()
-    {
-        WorkerAdded = null;
-        WorkerRemoved = null;
-    }
+    /// <summary>
+    /// 当前执行中的任务数量（全局 In-Flight）。
+    /// </summary>
+    internal int InFlightCount => _inFlight.Count;
 
-    public WorkerManager(CancellationToken globalToken, ILogger logger)
+    internal WorkerManager(CancellationToken globalToken, ILogger logger)
     {
         _globalToken = globalToken;
         _logger = logger;
 
-        _availableWorkers = Channel.CreateUnbounded<WorkerEndpoint<T>>(new UnboundedChannelOptions
+        _availableWorkers = Channel.CreateUnbounded<WorkerEndpoint>(new UnboundedChannelOptions
         {
             SingleReader = false,
             SingleWriter = false
@@ -52,16 +58,33 @@ public sealed class WorkerManager<T>
     }
 
     /// <summary>
+    /// 获取当前所有 Worker 的快照。
+    /// </summary>
+    internal IReadOnlyList<WorkerEndpointSnapshot> GetSnapshot()
+    {
+        lock (_lock)
+        {
+            var result = new WorkerEndpointSnapshot[_workers.Count];
+            for (var i = 0; i < _workers.Count; i++)
+            {
+                result[i] = _workers[i].CreateSnapshot();
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
     /// 注册一个新的 Worker。
     /// </summary>
-    public WorkerEndpoint<T> AddWorker(WorkerProcessingDelegate<T> handler, SubscriptionOptions options)
+    internal WorkerEndpoint AddWorker(WorkerProcessingDelegate handler, SubscriptionOptions options)
     {
         if (options is null)
         {
             throw new ArgumentNullException(nameof(options));
         }
 
-        WorkerEndpoint<T> endpoint;
+        WorkerEndpoint endpoint;
 
         lock (_lock)
         {
@@ -69,7 +92,7 @@ public sealed class WorkerManager<T>
             var prefetch = options.Prefetch;
             var concurrencyLimit = options.ConcurrencyLimit;
 
-            var channel = Channel.CreateBounded<T>(new BoundedChannelOptions(prefetch)
+            var channel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(prefetch)
             {
                 FullMode = BoundedChannelFullMode.Wait,
                 SingleReader = false,
@@ -78,7 +101,7 @@ public sealed class WorkerManager<T>
 
             var capacity = new WorkerCapacity(concurrencyLimit);
             var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_globalToken);
-            endpoint = new WorkerEndpoint<T>(workerId, channel, linkedCts, capacity)
+            endpoint = new WorkerEndpoint(workerId, channel, linkedCts, capacity)
             {
                 Name = options.Name,
                 HandlerTimeout = options.HandlerTimeout,
@@ -88,7 +111,7 @@ public sealed class WorkerManager<T>
             _workerMap[workerId] = endpoint;
         }
 
-        var processor = new WorkerProcessor<T>(endpoint, endpoint.Channel.Reader, handler, this);
+        var processor = new WorkerProcessor(endpoint, endpoint.Channel.Reader, handler, this);
         processor.Start();
 
         // 异步触发事件，不阻塞当前调用
@@ -104,20 +127,20 @@ public sealed class WorkerManager<T>
             }
         });
 
-        _availableWorkers.Writer.TryWrite(endpoint);
+        EnqueueAvailableWorker(endpoint);
         _logger.LogInformation("Worker {WorkerId} added", endpoint.Id);
         return endpoint;
     }
 
-    internal async ValueTask<WorkerAckToken<T>> RegisterInFlightAsync(
-        WorkerEndpoint<T> endpoint,
-        T payload,
+    internal async ValueTask<WorkerAckToken> RegisterInFlightAsync(
+        WorkerEndpoint endpoint,
+        ReadOnlyMemory<byte> payload,
         CancellationToken cancellationToken)
     {
         await endpoint.Capacity.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         var deliveryTag = SnowflakeIdGenerator.NextId();
-        var token = new WorkerAckToken<T>(endpoint.Id, deliveryTag, payload, () =>
+        var token = new WorkerAckToken(endpoint.Id, deliveryTag, payload, () =>
         {
             endpoint.Capacity.Release();
             ReleaseWorker(endpoint);
@@ -151,7 +174,7 @@ public sealed class WorkerManager<T>
     /// <summary>
     /// 根据 deliveryTag 查询正在处理的消息。
     /// </summary>
-    internal bool TryGetMessage(long deliveryTag, out WorkerAckToken<T> token)
+    private bool TryGetMessage(long deliveryTag, out WorkerAckToken token)
     {
         return _inFlight.TryGetValue(deliveryTag, out token!);
     }
@@ -171,9 +194,9 @@ public sealed class WorkerManager<T>
     /// <summary>
     /// 移除并停止指定 Worker。
     /// </summary>
-    public async Task<bool> RemoveWorkerAsync(int workerId)
+    internal async Task<bool> RemoveWorkerAsync(int workerId)
     {
-        WorkerEndpoint<T>? endpoint;
+        WorkerEndpoint? endpoint;
 
         lock (_lock)
         {
@@ -188,7 +211,7 @@ public sealed class WorkerManager<T>
         }
 
         endpoint.Channel.Writer.TryComplete();
-        endpoint.Cancellation.Cancel();
+        await endpoint.Cancellation.CancelAsync().ConfigureAwait(false);
 
         await endpoint.WaitForCompletionAsync().ConfigureAwait(false);
         if (endpoint.Fault is not null)
@@ -203,23 +226,17 @@ public sealed class WorkerManager<T>
     }
 
     /// <summary>
-    /// 获取当前所有 Worker 的快照。
-    /// </summary>
-    public WorkerEndpoint<T>[] GetSnapshot()
-    {
-        lock (_lock)
-        {
-            return _workers.ToArray();
-        }
-    }
-
-    /// <summary>
     /// 尝试从可用队列中租用一个 Worker。
     /// </summary>
-    public bool TryRentAvailableWorker(out WorkerEndpoint<T> endpoint)
+    internal bool TryRentAvailableWorker(out WorkerEndpoint endpoint)
     {
         while (_availableWorkers.Reader.TryRead(out endpoint))
         {
+            var remaining = Interlocked.Decrement(ref _availableWorkerCount);
+            if (remaining < 0)
+            {
+                Interlocked.Exchange(ref _availableWorkerCount, 0);
+            }
             if (!endpoint.IsActive)
             {
                 continue;
@@ -235,7 +252,7 @@ public sealed class WorkerManager<T>
     /// <summary>
     /// 等待直到有 Worker 可用。
     /// </summary>
-    public async Task WaitForWorkerAvailableAsync(CancellationToken cancellationToken)
+    internal async Task WaitForWorkerAvailableAsync(CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -252,16 +269,16 @@ public sealed class WorkerManager<T>
     /// 
     /// </summary>
     /// <param name="endpoint"></param>
-    public void ReleaseWorker(WorkerEndpoint<T> endpoint)
+    private void ReleaseWorker(WorkerEndpoint endpoint)
     {
         if (endpoint.IsActive)
         {
-            _availableWorkers.Writer.TryWrite(endpoint);
+            EnqueueAvailableWorker(endpoint);
             _logger.LogTrace("Worker {WorkerId} returned to available pool", endpoint.Id);
         }
     }
 
-    private void TryReturnIfCapacityAvailable(WorkerEndpoint<T> endpoint)
+    private void TryReturnIfCapacityAvailable(WorkerEndpoint endpoint)
     {
         if (!endpoint.IsActive)
         {
@@ -270,17 +287,25 @@ public sealed class WorkerManager<T>
 
         if (endpoint.Capacity.CurrentConnections < endpoint.Capacity.MaxConnections)
         {
-            _availableWorkers.Writer.TryWrite(endpoint);
+            EnqueueAvailableWorker(endpoint);
             _logger.LogTrace("Worker {WorkerId} still has capacity, re-queued for dispatch", endpoint.Id);
+        }
+    }
+
+    private void EnqueueAvailableWorker(WorkerEndpoint endpoint)
+    {
+        if (_availableWorkers.Writer.TryWrite(endpoint))
+        {
+            Interlocked.Increment(ref _availableWorkerCount);
         }
     }
 
     /// <summary>
     /// 完成所有 Worker 的 Writer，停止后续消息写入。
     /// </summary>
-    public void CompleteWriters()
+    internal void CompleteWriters()
     {
-        WorkerEndpoint<T>[] snapshot;
+        WorkerEndpoint[] snapshot;
         lock (_lock)
         {
             snapshot = _workers.ToArray();
@@ -295,9 +320,9 @@ public sealed class WorkerManager<T>
     /// <summary>
     /// 停止所有 Worker 并等待其任务完成。
     /// </summary>
-    public async Task StopAllAsync()
+    internal async Task StopAllAsync()
     {
-        WorkerEndpoint<T>[] snapshot;
+        WorkerEndpoint[] snapshot;
         lock (_lock)
         {
             snapshot = _workers.ToArray();
@@ -315,12 +340,14 @@ public sealed class WorkerManager<T>
         {
             endpoint.Cancellation.Dispose();
         }
+
+        Interlocked.Exchange(ref _availableWorkerCount, 0);
     }
 
     /// <summary>
     /// 当前活跃的 Worker 数量。
     /// </summary>
-    public int Count
+    private int Count
     {
         get
         {
@@ -334,7 +361,7 @@ public sealed class WorkerManager<T>
     /// <summary>
     /// 安全触发 WorkerAdded 事件（异步），捕获订阅者抛出的异常。
     /// </summary>
-    private async Task RaiseWorkerAddedAsync(WorkerEndpoint<T> endpoint)
+    private async Task RaiseWorkerAddedAsync(WorkerEndpoint endpoint)
     {
         var handlers = WorkerAdded;
         if (handlers == null)
@@ -342,11 +369,12 @@ public sealed class WorkerManager<T>
             return;
         }
 
+        var info = endpoint.CreateSnapshot();
         foreach (var handler in handlers.GetInvocationList())
         {
             try
             {
-                await ((Func<WorkerEndpoint<T>, Task>)handler).Invoke(endpoint).ConfigureAwait(false);
+                await ((Func<WorkerEndpointSnapshot, Task>)handler).Invoke(info).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -358,7 +386,7 @@ public sealed class WorkerManager<T>
     /// <summary>
     /// 安全触发 WorkerRemoved 事件（异步），捕获订阅者抛出的异常。
     /// </summary>
-    private async Task RaiseWorkerRemovedAsync(WorkerEndpoint<T> endpoint)
+    private async Task RaiseWorkerRemovedAsync(WorkerEndpoint endpoint)
     {
         var handlers = WorkerRemoved;
         if (handlers == null)
@@ -366,11 +394,12 @@ public sealed class WorkerManager<T>
             return;
         }
 
+        var info = endpoint.CreateSnapshot();
         foreach (var handler in handlers.GetInvocationList())
         {
             try
             {
-                await ((Func<WorkerEndpoint<T>, Task>)handler).Invoke(endpoint).ConfigureAwait(false);
+                await ((Func<WorkerEndpointSnapshot, Task>)handler).Invoke(info).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -379,7 +408,7 @@ public sealed class WorkerManager<T>
         }
     }
 
-    internal async ValueTask ReturnPayloadAsync(WorkerEndpoint<T> endpoint, T payload, CancellationToken cancellationToken)
+    internal async ValueTask ReturnPayloadAsync(WorkerEndpoint endpoint, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         if (endpoint.IsActive)
         {

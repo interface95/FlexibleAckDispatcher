@@ -1,11 +1,9 @@
-using System.Threading;
-
-namespace InMemoryWorkerBalancer;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// Worker 的容量控制器，限制同一时间正在处理的消息数量。
 /// </summary>
-public sealed class WorkerCapacity
+internal sealed class WorkerCapacity
 {
     private readonly SemaphoreSlim _semaphore;
     private int _current;

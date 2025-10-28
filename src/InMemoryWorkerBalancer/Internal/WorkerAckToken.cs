@@ -1,11 +1,9 @@
-using System.Threading;
-
-namespace InMemoryWorkerBalancer;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 代表一条正在处理的消息，用于手动确认和容量释放。
 /// </summary>
-public sealed class WorkerAckToken<T>
+internal sealed class WorkerAckToken
 {
     private readonly Action _release;
     private int _state; // 0: pending, 1: acked, 2: released
@@ -13,7 +11,7 @@ public sealed class WorkerAckToken<T>
     /// <summary>
     /// 构造一个新的 Ack token。
     /// </summary>
-    public WorkerAckToken(int workerId, long deliveryTag, T payload, Action release)
+    public WorkerAckToken(int workerId, long deliveryTag, ReadOnlyMemory<byte> payload, Action release)
     {
         WorkerId = workerId;
         DeliveryTag = deliveryTag;
@@ -34,7 +32,7 @@ public sealed class WorkerAckToken<T>
     /// <summary>
     /// 消息负载。
     /// </summary>
-    public T Payload { get; }
+    public ReadOnlyMemory<byte> Payload { get; }
 
     /// <summary>
     /// 当前是否已经确认。

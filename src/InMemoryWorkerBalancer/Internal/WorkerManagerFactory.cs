@@ -1,20 +1,20 @@
 using Microsoft.Extensions.Logging;
 
-namespace InMemoryWorkerBalancer;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
-/// 工厂方法，用于创建默认的 <see cref="WorkerManager{T}"/> 实例。
+/// 工厂方法，用于创建默认的 <see cref="WorkerManager"/> 实例。
 /// </summary>
-public static class WorkerManagerFactory
+internal static class WorkerManagerFactory
 {
     /// <summary>
     /// 创建一个 WorkerManager。
     /// </summary>
-    public static WorkerManager<T> CreateManager<T>(
+    internal static WorkerManager CreateManager(
         CancellationToken globalToken,
         ILogger? logger = null)
     {
-        return new WorkerManager<T>(
+        return new WorkerManager(
             globalToken,
             logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
     }

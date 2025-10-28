@@ -1,41 +1,65 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using InMemoryWorkerBalancer;
+
 namespace InMemoryWorkerBalancer.Abstractions;
 
 /// <summary>
 /// 发布订阅管理器，对外提供订阅、发布能力。
 /// </summary>
-public interface IPubSubManager<T> : IAsyncDisposable
+public interface IPubSubManager : IAsyncDisposable
 {
-    IPubSubChannel<T> Channel { get; }
+    /// <summary>
+    /// 直接发布一条消息。
+    /// </summary>
+    ValueTask PublishAsync<T>(T message, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 注册一个新的订阅者（委托方式）。
     /// </summary>
-    ValueTask<IPubSubSubscription> SubscribeAsync(WorkerProcessingDelegate<T> handler, CancellationToken cancellationToken = default);
+    ValueTask<IPubSubSubscription> SubscribeAsync<T>(WorkerProcessingDelegate<T> handler, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 注册一个新的订阅者（接口方式）。
     /// </summary>
-    ValueTask<IPubSubSubscription> SubscribeAsync(IWorkerMessageHandler<T> handler, CancellationToken cancellationToken = default);
+    ValueTask<IPubSubSubscription> SubscribeAsync<T>(IWorkerMessageHandler<T> handler, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 注册一个新的订阅者（委托 + 配置）。
     /// </summary>
-    ValueTask<IPubSubSubscription> SubscribeAsync(WorkerProcessingDelegate<T> handler, Action<SubscriptionOptions>? configure, CancellationToken cancellationToken = default);
+    ValueTask<IPubSubSubscription> SubscribeAsync<T>(WorkerProcessingDelegate<T> handler, Action<SubscriptionOptions>? configure, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 注册一个新的订阅者（接口 + 配置）。
     /// </summary>
-    ValueTask<IPubSubSubscription> SubscribeAsync(IWorkerMessageHandler<T> handler, Action<SubscriptionOptions>? configure, CancellationToken cancellationToken = default);
+    ValueTask<IPubSubSubscription> SubscribeAsync<T>(IWorkerMessageHandler<T> handler, Action<SubscriptionOptions>? configure, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 手动确定消息处理完成。
+    /// 手动确认消息处理完成。
     /// </summary>
-    /// <param name="deliveryTag"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
     ValueTask AckAsync(long deliveryTag, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 当前订阅数量。
+    /// </summary>
     int SubscriberCount { get; }
+
+    /// <summary>
+    /// 当前空闲 Worker 数量。
+    /// </summary>
+    int IdleWorkerCount { get; }
+
+    /// <summary>
+    /// 当前执行中的任务数量。
+    /// </summary>
+    int RunningTaskCount { get; }
+
+    /// <summary>
+    /// 获取当前所有 Worker 端点的快照。
+    /// </summary>
+    IReadOnlyList<WorkerEndpointSnapshot> GetSnapshot();
 }
 
 
