@@ -95,6 +95,7 @@ public sealed class SubscriptionOptions
             ConcurrencyLimit = Prefetch;
         }
 
+        EnsureConcurrencyInvariant();
         return this;
     }
 
@@ -124,11 +125,12 @@ public sealed class SubscriptionOptions
 
         if (limit > Prefetch)
         {
-            Prefetch = limit;
+            throw new ArgumentOutOfRangeException(nameof(limit), "Concurrency limit cannot exceed Prefetch。请先调用 WithPrefetch 调整预取数量。");
         }
 
         ConcurrencyLimit = limit;
         _hasCustomConcurrency = true;
+        EnsureConcurrencyInvariant();
         return this;
     }
 
@@ -140,6 +142,11 @@ public sealed class SubscriptionOptions
         if (timeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(timeout), "Handler timeout must be greater than zero.");
+        }
+
+        if (AckTimeout.HasValue && timeout >= AckTimeout.Value)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), "Handler timeout must be smaller than Ack timeout.");
         }
 
         HandlerTimeout = timeout;
@@ -170,6 +177,11 @@ public sealed class SubscriptionOptions
             throw new ArgumentOutOfRangeException(nameof(timeout), "Ack timeout must be greater than zero.");
         }
 
+        if (timeout <= HandlerTimeout)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), "Ack timeout must be greater than handler timeout.");
+        }
+ 
         AckTimeout = timeout;
         return this;
     }
@@ -180,6 +192,14 @@ public sealed class SubscriptionOptions
     public static SubscriptionOptions Create() => new(default);
 
     internal static SubscriptionOptions Create(SubscriptionDefaults defaults) => new(defaults);
+
+    private void EnsureConcurrencyInvariant()
+    {
+        if (ConcurrencyLimit > Prefetch)
+        {
+            throw new InvalidOperationException("Concurrency limit must be less than or equal to Prefetch.");
+        }
+    }
 }
 
 internal readonly struct SubscriptionDefaults

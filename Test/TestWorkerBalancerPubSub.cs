@@ -77,6 +77,7 @@ public sealed class TestWorkerBalancerPubSub
             }
         }, options => options
             .WithPrefetch(1)
+            .WithHandlerTimeout(TimeSpan.FromMilliseconds(50))
             .WithAckTimeout(TimeSpan.FromMilliseconds(150)));
 
         await manager.PublishAsync(1);
