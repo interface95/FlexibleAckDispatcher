@@ -7,6 +7,10 @@ on:
     branches: [ main, develop ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+
 env:
   DOTNET_VERSION: '9.0.x'
 
