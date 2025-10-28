@@ -51,6 +51,49 @@ public sealed class TestWorkerBalancerPubSub
 
     [TestMethod]
     /// <summary>
+    /// 验证超过 ACK 超时时间的消息会被自动释放。
+    /// </summary>
+    public async Task PubSubManager_ShouldAutoReleaseAfterAckTimeout()
+    {
+        await using var manager = PubSubManager.Create();
+
+        var firstDelivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondProcessed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processed = 0;
+
+        await manager.SubscribeAsync<int>(async (message, cancellationToken) =>
+        {
+            var order = Interlocked.Increment(ref processed);
+            if (order == 1)
+            {
+                firstDelivered.TrySetResult();
+                // 不 Ack，触发 ACK 超时
+            }
+            else
+            {
+                await message.AckAsync();
+                secondProcessed.TrySetResult();
+            }
+        }, options => options
+            .WithPrefetch(1)
+            .WithAckTimeout(TimeSpan.FromMilliseconds(150)));
+
+        await manager.PublishAsync(1);
+        await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        await Task.Delay(300); // 等待 ACK 超时触发
+
+        Assert.AreEqual(0, manager.RunningTaskCount, "ACK 超时后仍有任务占用并发槽位");
+        Assert.IsTrue(manager.IdleWorkerCount >= 1, "ACK 超时应释放 Worker 并回到空闲池");
+
+        await manager.PublishAsync(2);
+        await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.AreEqual(2, processed, "后续消息未正常处理");
+    }
+
+    [TestMethod]
+    /// <summary>
     /// 验证订阅者计数、空闲 worker 数、执行中任务数等基本指标。
     /// </summary>
     public async Task PubSubManager_ShouldExposeRuntimeMetrics()

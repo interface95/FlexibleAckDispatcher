@@ -61,6 +61,10 @@ internal sealed class WorkerEndpoint
     /// 连续失败或超时的阈值，超过后会让 worker 停止工作并抛出异常。
     /// </summary>
     public int FailureThreshold { get; set; } = 3;
+    /// <summary>
+    /// ACK 超时时间，超过后未确认的消息会被自动释放。
+    /// </summary>
+    public TimeSpan? AckTimeout { get; set; }
 
     /// <summary>
     /// 记录 Worker 正在运行的后台任务，以便停止时等待完成。
@@ -106,6 +110,7 @@ internal sealed class WorkerEndpoint
             Capacity.CurrentConnections,
             HandlerTimeout,
             FailureThreshold,
+            AckTimeout,
             Fault);
     }
 }

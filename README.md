@@ -138,10 +138,11 @@ await manager.SubscribeAsync<int>(
     },
     options => options
         .WithName("OrderProcessor")           // Worker 名称
-        .WithPrefetch(10)                     // 预取 10 条消息
-        .WithConcurrencyLimit(5)              // 最大并发 5
+        .WithPrefetch(10)                      // 预取 10 条消息
+        .WithConcurrencyLimit(5)               // 最大并发 5
         .WithHandlerTimeout(TimeSpan.FromSeconds(30))  // 30秒超时
-        .WithFailureThreshold(3));           // 3次失败后停止
+        .WithFailureThreshold(3)              // 3次失败后停止
+        .WithAckTimeout(TimeSpan.FromMinutes(10)));   // 10 分钟未 ACK 自动回收
 ```
 
 **参数说明：**
@@ -149,6 +150,7 @@ await manager.SubscribeAsync<int>(
 - **ConcurrencyLimit**: Worker 内部最大并发任务数（≤ Prefetch）
 - **HandlerTimeout**: 单条消息的最大处理时间
 - **FailureThreshold**: Worker 连续失败次数阈值
+- **AckTimeout**: 消息在规定时间内未确认则自动释放，避免占用槽位
 
 ### 4. 外部手动 ACK（类似 RabbitMQ）
 
@@ -171,6 +173,15 @@ if (deliveryTags.Count > 0)
 {
     await manager.AckAsync(deliveryTags[0]);
 }
+
+// 或者使用 AckTimeout 自动回收
+await manager.SubscribeAsync<int>(
+    async (message, ct) =>
+    {
+        Console.WriteLine($"收到: {message.Payload}");
+        // 不 ACK，等待 AckTimeout 自动释放
+    },
+    opts => opts.WithPrefetch(1).WithAckTimeout(TimeSpan.FromMinutes(5)));
 ```
 
 ### 5. 多订阅者负载均衡

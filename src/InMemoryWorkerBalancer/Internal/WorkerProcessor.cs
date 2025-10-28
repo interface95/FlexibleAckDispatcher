@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -52,8 +51,16 @@ internal sealed class WorkerProcessor
 
         for (var i = 0; i < concurrency; i++)
         {
+            var processingTask = new WorkerProcessingTask(
+                _endpoint,
+                _reader,
+                _handler,
+                _workerManager,
+                () => stopped,
+                () => ReportFailure(ref failureCount, failureLock, ref stopped));
+
             workers[i] = Task.Factory.StartNew(
-                () => WorkerLoopAsync(() => stopped, () => ReportFailure(ref failureCount, failureLock, ref stopped), cancellationToken),
+                () => processingTask.RunAsync(cancellationToken),
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default).Unwrap();
@@ -101,70 +108,6 @@ internal sealed class WorkerProcessor
                     }
                 }
             }
-        }
-    }
-
-    private async Task WorkerLoopAsync(Func<bool> isStopped, Action reportFailure, CancellationToken cancellationToken)
-    {
-        try
-        {
-            while (!isStopped() && await _reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                while (!isStopped() && _reader.TryRead(out var payload))
-                {
-                    WorkerAckToken? token = null;
-                    try
-                    {
-                        token = await _workerManager.RegisterInFlightAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
-                        _workerManager.Logger.LogDebug("Worker {WorkerId} handling deliveryTag {DeliveryTag}", _endpoint.Id, token.DeliveryTag);
-
-                        await ExecuteWithTimeoutAsync(token, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        reportFailure();
-                        if (token is not null)
-                        {
-                            _workerManager.ForceRelease(token.DeliveryTag);
-                        }
-                        else if (!cancellationToken.IsCancellationRequested)
-                        {
-                            try
-                            {
-                                await _workerManager.ReturnPayloadAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
-                            }
-                            catch (ChannelClosedException)
-                            {
-                                _workerManager.Logger.LogWarning("Worker {WorkerId} channel closed while returning payload", _endpoint.Id);
-                            }
-                        }
-                        _workerManager.Logger.LogError(ex, "Worker {WorkerId} handling failed", _endpoint.Id);
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-    }
-
-    private async Task ExecuteWithTimeoutAsync(WorkerAckToken token, CancellationToken outerCancellationToken)
-    {
-        using var scope = ReusableTimeoutScope.Rent(outerCancellationToken, _endpoint.HandlerTimeout, out var linkedToken);
-
-        try
-        {
-            var context = new WorkerDeliveryContext(token, _workerManager.TryAck);
-            await _handler(context, linkedToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!outerCancellationToken.IsCancellationRequested && linkedToken.IsCancellationRequested)
-        {
-            _workerManager.Logger.LogWarning(
-                "Worker {WorkerId} handling deliveryTag {DeliveryTag} timed out after {Timeout}.",
-                _endpoint.Id,
-                token.DeliveryTag,
-                _endpoint.HandlerTimeout);
-            throw;
         }
     }
 }

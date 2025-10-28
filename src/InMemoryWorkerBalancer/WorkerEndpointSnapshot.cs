@@ -13,5 +13,6 @@ public readonly record struct WorkerEndpointSnapshot(
     int CurrentConcurrency,
     TimeSpan HandlerTimeout,
     int FailureThreshold,
+    TimeSpan? AckTimeout,
     Exception? Fault);
 

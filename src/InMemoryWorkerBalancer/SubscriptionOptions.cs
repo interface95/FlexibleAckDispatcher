@@ -35,6 +35,10 @@ public sealed class SubscriptionOptions
     /// 连续失败或超时的阈值。
     /// </summary>
     public int FailureThreshold { get; private set; } = 3;
+    /// <summary>
+    /// ACK 超时时间，超过该时间未确认的消息将被自动释放。
+    /// </summary>
+    public TimeSpan? AckTimeout { get; private set; }
 
     public static SubscriptionOptions Defaults { get; } = new();
 
@@ -115,12 +119,26 @@ public sealed class SubscriptionOptions
     /// </summary>
     public SubscriptionOptions WithFailureThreshold(int threshold)
     {
-        if (threshold <= 0 || threshold > 10)
+        if (threshold <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(threshold), "Failure threshold must be between 1 and 10.");
+            throw new ArgumentOutOfRangeException(nameof(threshold), "Failure threshold must be greater than zero.");
         }
 
         FailureThreshold = threshold;
+        return this;
+    }
+
+    /// <summary>
+    /// 设置 ACK 超时时间，超过该时间未确认的消息将被自动释放。
+    /// </summary>
+    public SubscriptionOptions WithAckTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), "Ack timeout must be greater than zero.");
+        }
+
+        AckTimeout = timeout;
         return this;
     }
 

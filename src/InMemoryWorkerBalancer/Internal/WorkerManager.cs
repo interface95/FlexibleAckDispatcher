@@ -20,6 +20,7 @@ internal sealed class WorkerManager
     private readonly Channel<WorkerEndpoint> _availableWorkers;
     private readonly CancellationToken _globalToken;
     private readonly ILogger _logger;
+    private readonly AckTimeoutScheduler _ackTimeoutScheduler;
     private int _workerIdSeed;
     private int _availableWorkerCount;
 
@@ -55,6 +56,7 @@ internal sealed class WorkerManager
             SingleReader = false,
             SingleWriter = false
         });
+        _ackTimeoutScheduler = new AckTimeoutScheduler(this, _logger);
     }
 
     /// <summary>
@@ -105,7 +107,8 @@ internal sealed class WorkerManager
             {
                 Name = options.Name,
                 HandlerTimeout = options.HandlerTimeout,
-                FailureThreshold = options.FailureThreshold
+                FailureThreshold = options.FailureThreshold,
+                AckTimeout = options.AckTimeout
             };
             _workers.Add(endpoint);
             _workerMap[workerId] = endpoint;
@@ -150,6 +153,7 @@ internal sealed class WorkerManager
         _logger.LogDebug("Worker {WorkerId} acquired slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
 
         TryReturnIfCapacityAvailable(endpoint);
+        _ackTimeoutScheduler.Schedule(endpoint, token);
         return token;
     }
 
@@ -160,6 +164,7 @@ internal sealed class WorkerManager
     {
         if (_inFlight.TryRemove(deliveryTag, out var token))
         {
+            _ackTimeoutScheduler.Cancel(deliveryTag);
             var result = token.TryAck();
             if (!result)
             {
@@ -184,6 +189,7 @@ internal sealed class WorkerManager
     /// </summary>
     internal void ForceRelease(long deliveryTag)
     {
+        _ackTimeoutScheduler.Cancel(deliveryTag);
         if (_inFlight.TryRemove(deliveryTag, out var token))
         {
             token.ForceRelease();
@@ -342,6 +348,7 @@ internal sealed class WorkerManager
         }
 
         Interlocked.Exchange(ref _availableWorkerCount, 0);
+        _ackTimeoutScheduler.Reset();
     }
 
     /// <summary>
@@ -418,5 +425,16 @@ internal sealed class WorkerManager
         {
             _logger.LogWarning("Discarded payload because worker {WorkerId} is inactive", endpoint.Id);
         }
+    }
+
+    internal async Task HandleAckTimeoutAsync(WorkerEndpoint endpoint, WorkerAckToken token)
+    {
+        if (_inFlight.TryRemove(token.DeliveryTag, out var current))
+        {
+            current.ForceRelease();
+            _logger.LogWarning("Worker {WorkerId} deliveryTag {DeliveryTag} released due to ACK timeout", endpoint.Id, token.DeliveryTag);
+        }
+
+        await Task.CompletedTask;
     }
 }
