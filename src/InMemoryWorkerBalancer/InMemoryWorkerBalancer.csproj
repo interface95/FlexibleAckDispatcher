@@ -15,8 +15,8 @@
         <Description>高性能、灵活的内存消息调度系统，基于 .NET 实现的发布-订阅模式，支持灵活的消息确认机制、并发控制和负载均衡。</Description>
         <PackageTags>pubsub;worker;dispatcher;message-queue;ack;load-balancer;concurrency;async;dotnet</PackageTags>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
-        <PackageProjectUrl>https://github.com/yourusername/FlexibleAckDispatcher</PackageProjectUrl>
-        <RepositoryUrl>https://github.com/yourusername/FlexibleAckDispatcher</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/interface95/FlexibleAckDispatcher</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/interface95/FlexibleAckDispatcher</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <GeneratePackageOnBuild>false</GeneratePackageOnBuild>

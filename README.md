@@ -12,7 +12,27 @@
 - 📊 **故障隔离**：Worker 级别的失败阈值，超过阈值自动停止 Worker
 - 🔌 **热插拔**：支持动态添加和移除订阅者
 
-## 📦 项目结构
+## 📦 安装
+
+### NuGet 包管理器
+
+```bash
+dotnet add package InMemoryWorkerBalancer
+```
+
+### Package Manager Console
+
+```powershell
+Install-Package InMemoryWorkerBalancer
+```
+
+### .csproj 文件
+
+```xml
+<PackageReference Include="InMemoryWorkerBalancer" Version="1.0.0-preview.1" />
+```
+
+## 📂 项目结构
 
 ```
 FlexibleAckDispatcher/
