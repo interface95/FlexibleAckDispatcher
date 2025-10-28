@@ -91,6 +91,7 @@ public sealed class TestWorkerBalancerPubSub
         await manager.PublishAsync(2);
         await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
+        Assert.AreEqual(0, manager.PendingCount, "应无未消费消息");
         Assert.AreEqual(2, processed, "后续消息未正常处理");
     }
 
@@ -159,6 +160,7 @@ public sealed class TestWorkerBalancerPubSub
         Assert.AreEqual(0, manager.SubscriberCount, "初始订阅者数量应为 0");
         Assert.AreEqual(0, manager.IdleCount, "初始空闲 worker 数应为 0");
         Assert.AreEqual(0, manager.RunningCount, "初始执行中任务数应为 0");
+        Assert.AreEqual(0, manager.PendingCount, "初始未消费消息数应为 0");
         Assert.AreEqual(0, manager.GetSnapshot().Count, "快照应为空");
 
         var subscription = await manager.SubscribeAsync<int>(
@@ -176,7 +178,7 @@ public sealed class TestWorkerBalancerPubSub
 
         Assert.IsTrue(manager.IdleCount >= 0, "空闲 worker 数应为非负");
         Assert.IsTrue(manager.RunningCount >= 0, "执行中任务数应为非负");
-        Assert.IsTrue(manager.QueueCount >= 0, "队列长度应为非负");
+        Assert.IsTrue(manager.PendingCount >= 0, "未消费消息数应为非负");
         Assert.IsTrue(manager.DispatchedCount >= 0, "已调度计数应为非负");
         Assert.IsTrue(manager.CompletedCount >= 0, "已完成计数应为非负");
 
@@ -185,6 +187,7 @@ public sealed class TestWorkerBalancerPubSub
         var snapshotAfterDispose = manager.GetSnapshot();
         Assert.AreEqual(0, manager.SubscriberCount, "取消订阅后订阅者数量应为 0");
         Assert.AreEqual(0, snapshotAfterDispose.Count, "取消订阅后 worker 快照应为空");
+        Assert.AreEqual(0, manager.PendingCount, "取消订阅后应无未消费消息");
     }
 
     [TestMethod]

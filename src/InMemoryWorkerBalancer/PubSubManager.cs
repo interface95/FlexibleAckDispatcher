@@ -98,9 +98,9 @@ public sealed class PubSubManager : IPubSubManager
     public int RunningCount => _workerManager.RunningCount;
 
     /// <summary>
-    /// 当前调度队列中的 Worker 数量。
+    /// 当前未消费的消息数量。
     /// </summary>
-    public int QueueCount => _workerManager.QueueCount;
+    public long PendingCount => _workerManager.PendingCount;
 
     /// <summary>
     /// 已推送（调度）的任务总数。
@@ -244,7 +244,7 @@ public sealed class PubSubManager : IPubSubManager
     private IPubSubChannel<T> Channel<T>()
     {
         return (IPubSubChannel<T>)_typedChannels.GetOrAdd(typeof(T),
-            _ => new TypedPubSubChannel<T>(_channel.Writer, _serializer));
+            _ => new TypedPubSubChannel<T>(_channel.Writer, _serializer, _workerManager));
     }
 
     internal async Task RemoveSubscriptionAsync(int subscriptionId)

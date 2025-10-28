@@ -12,17 +12,29 @@ internal sealed class TypedPubSubChannel<T> : IPubSubChannel<T>
 {
     private readonly ChannelWriter<ReadOnlyMemory<byte>> _writer;
     private readonly IWorkerPayloadSerializer _serializer;
+    private readonly WorkerManager _workerManager;
 
-    public TypedPubSubChannel(ChannelWriter<ReadOnlyMemory<byte>> writer, IWorkerPayloadSerializer serializer)
+    public TypedPubSubChannel(ChannelWriter<ReadOnlyMemory<byte>> writer, IWorkerPayloadSerializer serializer, WorkerManager workerManager)
     {
         _writer = writer;
         _serializer = serializer;
+        _workerManager = workerManager;
     }
 
-    public ValueTask PublishAsync(T message, CancellationToken cancellationToken = default)
+    public async ValueTask PublishAsync(T message, CancellationToken cancellationToken = default)
     {
         var payload = _serializer.Serialize(message);
-        return _writer.WriteAsync(payload, cancellationToken);
+        _workerManager.IncrementPending();
+
+        try
+        {
+            await _writer.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            _workerManager.DecrementPending();
+            throw;
+        }
     }
 }
 

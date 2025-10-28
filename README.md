@@ -289,7 +289,7 @@ Console.WriteLine($"当前订阅者数: {manager.SubscriberCount}");
 // 空闲 Worker 数（可用于负载判断）
 Console.WriteLine($"空闲 Worker 数: {manager.IdleCount}");
 Console.WriteLine($"正在处理任务数: {manager.RunningCount}");
-Console.WriteLine($"队列中等待的 Worker 数: {manager.QueueCount}");
+Console.WriteLine($"未消费消息数: {manager.PendingCount}");
 Console.WriteLine($"累计调度任务数: {manager.DispatchedCount}");
 Console.WriteLine($"累计完成任务数: {manager.CompletedCount}");
 

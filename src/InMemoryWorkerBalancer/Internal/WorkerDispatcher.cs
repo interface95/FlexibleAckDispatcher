@@ -37,6 +37,7 @@ internal sealed class WorkerDispatcher
                     try
                     {
                         await endpoint.Writer.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+                        workerManager.DecrementPending();
                         break;
                     }
                     catch (ChannelClosedException)

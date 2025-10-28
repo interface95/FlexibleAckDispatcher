@@ -57,9 +57,9 @@ public interface IPubSubManager : IAsyncDisposable
     int RunningCount { get; }
 
     /// <summary>
-    /// 调度队列中可用的 Worker 数量。
+    /// 未被消费的消息数量。
     /// </summary>
-    int QueueCount { get; }
+    long PendingCount { get; }
 
     /// <summary>
     /// 已推送任务总数。

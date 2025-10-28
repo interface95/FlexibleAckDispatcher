@@ -37,6 +37,7 @@ internal sealed class WorkerManager
     private int _disposed;
     private long _dispatchedCount;
     private long _completedCount;
+    private long _pendingCount;
 
     private readonly record struct AckTimeoutEntry(int WorkerId, DateTimeOffset Deadline, TimeSpan Timeout);
 
@@ -65,7 +66,7 @@ internal sealed class WorkerManager
     /// <summary>
     /// 调度队列中的 Worker 数量。
     /// </summary>
-    internal int QueueCount
+    internal int WorkerQueueCount
     {
         get
         {
@@ -79,6 +80,8 @@ internal sealed class WorkerManager
     internal long DispatchedCount => Interlocked.Read(ref _dispatchedCount);
 
     internal long CompletedCount => Interlocked.Read(ref _completedCount);
+
+    internal long PendingCount => Math.Max(Interlocked.Read(ref _pendingCount), 0);
 
     internal WorkerManager(CancellationToken globalToken, ILogger logger, TimeSpan? ackMonitorInterval)
     {
@@ -299,6 +302,7 @@ internal sealed class WorkerManager
             }
         }
 
+        _availableWorkerSignal.Release();
         return false;
     }
 
@@ -613,4 +617,17 @@ internal sealed class WorkerManager
         }
     }
 
+    internal void IncrementPending()
+    {
+        Interlocked.Increment(ref _pendingCount);
+    }
+
+    internal void DecrementPending()
+    {
+        var value = Interlocked.Decrement(ref _pendingCount);
+        if (value < 0)
+        {
+            Interlocked.Exchange(ref _pendingCount, 0);
+        }
+    }
 }
