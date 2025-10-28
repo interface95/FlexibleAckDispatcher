@@ -96,6 +96,60 @@ public sealed class TestWorkerBalancerPubSub
 
     [TestMethod]
     /// <summary>
+    /// 验证新增 Worker 时会优先分配给负载较低的 Worker。
+    /// </summary>
+    public async Task PubSubManager_ShouldPrioritizeLessLoadedWorker()
+    {
+        await using var manager = PubSubManager.Create();
+
+        var worker1Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var worker1Release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondMessageWorkerId = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var worker1Id = 0;
+        var worker2Id = 0;
+
+        await manager.SubscribeAsync<int>(async (message, cancellationToken) =>
+        {
+            worker1Id = message.WorkerId;
+            worker1Started.TrySetResult();
+            await worker1Release.Task.WaitAsync(cancellationToken);
+            await message.AckAsync();
+        }, options => options
+            .WithName("PrimaryWorker")
+            .WithPrefetch(10)
+            .WithConcurrencyLimit(5)
+            .WithHandlerTimeout(TimeSpan.FromSeconds(10))
+            .WithAckTimeout(TimeSpan.FromMinutes(1)));
+
+        await manager.PublishAsync(1);
+        await worker1Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await manager.SubscribeAsync<int>(async (message, cancellationToken) =>
+        {
+            worker2Id = message.WorkerId;
+            await message.AckAsync();
+            secondMessageWorkerId.TrySetResult(message.WorkerId);
+        }, options => options
+            .WithName("SecondaryWorker")
+            .WithPrefetch(10)
+            .WithConcurrencyLimit(5)
+            .WithHandlerTimeout(TimeSpan.FromSeconds(10))
+            .WithAckTimeout(TimeSpan.FromMinutes(1)));
+
+        await manager.PublishAsync(2);
+        var assignedWorkerId = await secondMessageWorkerId.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.AreNotEqual(0, worker1Id, "主 Worker 未接收到消息");
+        Assert.AreNotEqual(0, worker2Id, "次 Worker 未初始化");
+        Assert.AreNotEqual(worker1Id, worker2Id, "两个 Worker 应具有不同的标识");
+        Assert.AreEqual(worker2Id, assignedWorkerId, "调度器未优先选择负载较低的 Worker");
+
+        worker1Release.TrySetResult();
+        await Task.Delay(100);
+    }
+
+    [TestMethod]
+    /// <summary>
     /// 验证订阅者计数、空闲 worker 数、执行中任务数等基本指标。
     /// </summary>
     public async Task PubSubManager_ShouldExposeRuntimeMetrics()
