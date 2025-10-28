@@ -10,6 +10,8 @@
 - 🎯 **细粒度并发控制**：支持 Prefetch（预取数量）和 ConcurrencyLimit（并发限制）双重控制
 - ⏱️ **超时保护机制**：内置消息处理超时，自动释放 Worker 槽位，防止阻塞
 - 📊 **丰富运行时指标**：实时监控订阅者数量、空闲 Worker 数、执行中任务数以及 Worker 快照
+- 🛠️ **可配默认策略**：通过 `PubSubManagerOptions` 统一下发默认的 Prefetch、并发限制、处理超时与 ACK 超时
+- 🔒 **更安全的载荷控制**：内置最大载荷尺寸限制（默认 4 MiB），避免异常数据冲击内存
 - 🔌 **动态热插拔**：支持运行时动态添加和移除订阅者
 - 🛡️ **失败保护**：连续失败阈值，达到限制后自动停止 Worker，防止级联故障
 
@@ -116,6 +118,12 @@ await Task.Delay(1000); // 等待处理完成
 await using var manager = PubSubManager.Create(options => options
     .WithLogger(logger)                                    // 配置日志记录器
     .WithSerializer(customSerializer)                      // 配置自定义序列化器
+    .WithDefaultPrefetch(8)                                // 设置统一默认的 Prefetch
+    .WithDefaultConcurrencyLimit(4)                        // 统一默认并发上限
+    .WithDefaultHandlerTimeout(TimeSpan.FromSeconds(45))   // 默认处理超时
+    .WithDefaultFailureThreshold(5)                        // 默认失败阈值
+    .WithDefaultAckTimeout(TimeSpan.FromMinutes(5))        // 默认 ACK 超时
+    .WithAckMonitorInterval(TimeSpan.FromMilliseconds(200))// 调整 ACK 超时轮询频率
     .OnWorkerAddedHandler(async snapshot =>                // Worker 添加事件
     {
         Console.WriteLine($"Worker {snapshot.Id} ({snapshot.Name}) 已加入");
@@ -133,6 +141,7 @@ await manager.SubscribeAsync<int>(
     async (message, cancellationToken) =>
     {
         Console.WriteLine($"Worker {message.WorkerId} 处理: {message.Payload}");
+        Console.WriteLine($"开始处理时间: {message.StartedAt:O}");
         await Task.Delay(100, cancellationToken);
         await message.AckAsync();
     },
@@ -195,6 +204,7 @@ for (int i = 0; i < 3; i++)
         async (message, cancellationToken) =>
         {
             Console.WriteLine($"订阅者 {workerIndex} (WorkerId={message.WorkerId}) 处理: {message.Payload}");
+            Console.WriteLine($"开始处理时间: {message.StartedAt:O}");
             await Task.Delay(100, cancellationToken);
             await message.AckAsync();
         },
@@ -259,6 +269,14 @@ for (int i = 0; i < 10; i++)
 await subscription1.DisposeAsync();
 Console.WriteLine($"剩余订阅者数: {manager.SubscriberCount}");
 ```
+
+## 🔐 高级配置与安全性
+
+- **ACK 超时监控**：默认根据订阅的 `AckTimeout` 自动推导轮询间隔，可通过 `WithAckMonitorInterval` 精细化控制。内部采用按需启动的监控任务，并限制待处理 ACK 的缓存数量，避免资源膨胀。
+- **统一默认值**：`WithDefaultPrefetch`、`WithDefaultConcurrencyLimit`、`WithDefaultHandlerTimeout`、`WithDefaultAckTimeout` 等方法可以集中下发约束，新订阅若未覆写将自动继承。
+- **消息载荷保护**：`JsonWorkerPayloadSerializer` 在序列化/反序列化阶段都会校验载荷长度（默认 4 MiB）。如需处理更大数据，请显式传入更高的 `maxPayloadSize` 或自定义实现。
+- **任务计时**：`WorkerMessage.StartedAt` 暴露任务开始时间，配合 `AckTimeout` 或自定义监控可以统计处理耗时、排查慢任务。
+- **日志控制**：Worker 生命周期相关日志默认为 Debug 级别，可通过注入的 `ILogger` 调整过滤级别或自定义输出。
 
 ## 📊 运行时观测与监控
 
