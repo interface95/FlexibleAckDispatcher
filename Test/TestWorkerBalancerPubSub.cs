@@ -85,8 +85,8 @@ public sealed class TestWorkerBalancerPubSub
 
         await Task.Delay(800); // 等待 ACK 超时触发
 
-        Assert.AreEqual(0, manager.RunningTaskCount, "ACK 超时后仍有任务占用并发槽位");
-        Assert.IsTrue(manager.IdleWorkerCount >= 1, "ACK 超时应释放 Worker 并回到空闲池");
+        Assert.AreEqual(0, manager.RunningCount, "ACK 超时后仍有任务占用并发槽位");
+        Assert.IsTrue(manager.IdleCount >= 1, "ACK 超时应释放 Worker 并回到空闲池");
 
         await manager.PublishAsync(2);
         await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(1));
@@ -157,8 +157,8 @@ public sealed class TestWorkerBalancerPubSub
         await using var manager = PubSubManager.Create();
 
         Assert.AreEqual(0, manager.SubscriberCount, "初始订阅者数量应为 0");
-        Assert.AreEqual(0, manager.IdleWorkerCount, "初始空闲 worker 数应为 0");
-        Assert.AreEqual(0, manager.RunningTaskCount, "初始执行中任务数应为 0");
+        Assert.AreEqual(0, manager.IdleCount, "初始空闲 worker 数应为 0");
+        Assert.AreEqual(0, manager.RunningCount, "初始执行中任务数应为 0");
         Assert.AreEqual(0, manager.GetSnapshot().Count, "快照应为空");
 
         var subscription = await manager.SubscribeAsync<int>(
@@ -170,12 +170,15 @@ public sealed class TestWorkerBalancerPubSub
         Assert.AreEqual(1, snapshotAfterSubscribe.Count, "快照应包含 1 个 worker");
         Assert.IsTrue(snapshotAfterSubscribe[0].IsActive, "worker 应处于激活状态");
 
-        // 发布消息并等待处理，验证 IdleWorkerCount 和 RunningTaskCount 的动态变化
+        // 发布消息并等待处理，验证 IdleCount 和 RunningCount 的动态变化
         await manager.PublishAsync(42);
         await Task.Delay(50);
 
-        Assert.IsTrue(manager.IdleWorkerCount >= 0, "空闲 worker 数应为非负");
-        Assert.IsTrue(manager.RunningTaskCount >= 0, "执行中任务数应为非负");
+        Assert.IsTrue(manager.IdleCount >= 0, "空闲 worker 数应为非负");
+        Assert.IsTrue(manager.RunningCount >= 0, "执行中任务数应为非负");
+        Assert.IsTrue(manager.QueueCount >= 0, "队列长度应为非负");
+        Assert.IsTrue(manager.DispatchedCount >= 0, "已调度计数应为非负");
+        Assert.IsTrue(manager.CompletedCount >= 0, "已完成计数应为非负");
 
         await subscription.DisposeAsync();
 

@@ -287,10 +287,11 @@ Console.WriteLine($"剩余订阅者数: {manager.SubscriberCount}");
 Console.WriteLine($"当前订阅者数: {manager.SubscriberCount}");
 
 // 空闲 Worker 数（可用于负载判断）
-Console.WriteLine($"空闲 Worker 数: {manager.IdleWorkerCount}");
-
-// 正在处理的任务总数（所有 Worker 总和）
-Console.WriteLine($"正在处理任务数: {manager.RunningTaskCount}");
+Console.WriteLine($"空闲 Worker 数: {manager.IdleCount}");
+Console.WriteLine($"正在处理任务数: {manager.RunningCount}");
+Console.WriteLine($"队列中等待的 Worker 数: {manager.QueueCount}");
+Console.WriteLine($"累计调度任务数: {manager.DispatchedCount}");
+Console.WriteLine($"累计完成任务数: {manager.CompletedCount}");
 
 // 获取所有 Worker 的详细快照
 var snapshots = manager.GetSnapshot();
@@ -325,7 +326,7 @@ public class HealthCheck
         }
         
         // 检查是否有空闲 Worker
-        if (manager.IdleWorkerCount == 0 && manager.RunningTaskCount > 0)
+        if (manager.IdleCount == 0 && manager.RunningCount > 0)
         {
             Console.WriteLine("警告: 所有 Worker 都在忙，可能处理能力不足");
             return false;

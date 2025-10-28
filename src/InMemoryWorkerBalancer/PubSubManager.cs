@@ -90,12 +90,27 @@ public sealed class PubSubManager : IPubSubManager
     /// <summary>
     /// 当前空闲 Worker 数量。
     /// </summary>
-    public int IdleWorkerCount => _workerManager.AvailableWorkerCount;
+    public int IdleCount => _workerManager.IdleCount;
 
     /// <summary>
     /// 当前执行中的任务数量（所有 Worker 总和）。
     /// </summary>
-    public int RunningTaskCount => _workerManager.InFlightCount;
+    public int RunningCount => _workerManager.RunningCount;
+
+    /// <summary>
+    /// 当前调度队列中的 Worker 数量。
+    /// </summary>
+    public int QueueCount => _workerManager.QueueCount;
+
+    /// <summary>
+    /// 已推送（调度）的任务总数。
+    /// </summary>
+    public long DispatchedCount => _workerManager.DispatchedCount;
+
+    /// <summary>
+    /// 已完成（确认）的任务总数。
+    /// </summary>
+    public long CompletedCount => _workerManager.CompletedCount;
 
     /// <summary>
     /// 获取当前所有 Worker 端点的快照。

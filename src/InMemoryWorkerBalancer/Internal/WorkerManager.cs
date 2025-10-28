@@ -35,6 +35,8 @@ internal sealed class WorkerManager
     private int _workerIdSeed;
     private int _availableWorkerCount;
     private int _disposed;
+    private long _dispatchedCount;
+    private long _completedCount;
 
     private readonly record struct AckTimeoutEntry(int WorkerId, DateTimeOffset Deadline, TimeSpan Timeout);
 
@@ -53,12 +55,30 @@ internal sealed class WorkerManager
     /// <summary>
     /// 当前空闲 Worker 数量。
     /// </summary>
-    internal int AvailableWorkerCount => Math.Max(Volatile.Read(ref _availableWorkerCount), 0);
+    internal int IdleCount => Math.Max(Volatile.Read(ref _availableWorkerCount), 0);
 
     /// <summary>
     /// 当前执行中的任务数量（全局 In-Flight）。
     /// </summary>
-    internal int InFlightCount => _inFlight.Count;
+    internal int RunningCount => _inFlight.Count;
+
+    /// <summary>
+    /// 调度队列中的 Worker 数量。
+    /// </summary>
+    internal int QueueCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _availableWorkers.Count;
+            }
+        }
+    }
+
+    internal long DispatchedCount => Interlocked.Read(ref _dispatchedCount);
+
+    internal long CompletedCount => Interlocked.Read(ref _completedCount);
 
     internal WorkerManager(CancellationToken globalToken, ILogger logger, TimeSpan? ackMonitorInterval)
     {
@@ -148,6 +168,7 @@ internal sealed class WorkerManager
         });
         _inFlight[deliveryTag] = token;
         _logger.LogDebug("Worker {WorkerId} acquired slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
+        Interlocked.Increment(ref _dispatchedCount);
 
         TryReturnIfCapacityAvailable(endpoint);
         return token;
@@ -168,6 +189,11 @@ internal sealed class WorkerManager
         }
 
         RemoveAckTimeout(deliveryTag);
+
+        if (result)
+        {
+            Interlocked.Increment(ref _completedCount);
+        }
 
         return result;
     }
@@ -273,7 +299,6 @@ internal sealed class WorkerManager
             }
         }
 
-        _availableWorkerSignal.Release();
         return false;
     }
 

@@ -49,12 +49,27 @@ public interface IPubSubManager : IAsyncDisposable
     /// <summary>
     /// 当前空闲 Worker 数量。
     /// </summary>
-    int IdleWorkerCount { get; }
+    int IdleCount { get; }
 
     /// <summary>
     /// 当前执行中的任务数量。
     /// </summary>
-    int RunningTaskCount { get; }
+    int RunningCount { get; }
+
+    /// <summary>
+    /// 调度队列中可用的 Worker 数量。
+    /// </summary>
+    int QueueCount { get; }
+
+    /// <summary>
+    /// 已推送任务总数。
+    /// </summary>
+    long DispatchedCount { get; }
+
+    /// <summary>
+    /// 已完成任务总数。
+    /// </summary>
+    long CompletedCount { get; }
 
     /// <summary>
     /// 获取当前所有 Worker 端点的快照。
