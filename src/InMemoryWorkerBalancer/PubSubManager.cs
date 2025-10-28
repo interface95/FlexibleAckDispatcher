@@ -48,6 +48,17 @@ public sealed class PubSubManager : IPubSubManager
         });
 
         _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger);
+        AttachWorkerLifecycleHandlers(options);
+        _dispatchTask = Task.Factory.StartNew(
+                () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default)
+            .Unwrap();
+    }
+
+    private void AttachWorkerLifecycleHandlers(PubSubManagerOptions options)
+    {
         foreach (var handler in options.WorkerAddedHandlers)
         {
             _workerManager.WorkerAdded += handler;
@@ -57,13 +68,6 @@ public sealed class PubSubManager : IPubSubManager
         {
             _workerManager.WorkerRemoved += handler;
         }
-
-        _dispatchTask = Task.Factory.StartNew(
-                () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default)
-            .Unwrap();
     }
 
     /// <summary>
