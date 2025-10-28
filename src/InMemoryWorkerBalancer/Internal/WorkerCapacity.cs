@@ -3,10 +3,11 @@ namespace InMemoryWorkerBalancer.Internal;
 /// <summary>
 /// Worker 的容量控制器，限制同一时间正在处理的消息数量。
 /// </summary>
-internal sealed class WorkerCapacity
+internal sealed class WorkerCapacity : IDisposable
 {
     private readonly SemaphoreSlim _semaphore;
     private int _current;
+    private int _disposed;
 
     /// <summary>
     /// 初始化容量控制器。
@@ -39,13 +40,14 @@ internal sealed class WorkerCapacity
     /// <returns>成功占用返回 true，达到上限返回 false。</returns>
     public bool TryAcquire()
     {
-        if (_semaphore.Wait(0))
-        {
-            Interlocked.Increment(ref _current);
-            return true;
-        }
+        ThrowIfDisposed();
 
-        return false;
+        if (!_semaphore.Wait(0)) 
+            return false;
+        
+        Interlocked.Increment(ref _current);
+        return true;
+
     }
 
     /// <summary>
@@ -53,6 +55,8 @@ internal sealed class WorkerCapacity
     /// </summary>
     public async ValueTask WaitAsync(CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
+
         await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         Interlocked.Increment(ref _current);
     }
@@ -62,6 +66,8 @@ internal sealed class WorkerCapacity
     /// </summary>
     public void Release()
     {
+        ThrowIfDisposed();
+
         var current = Interlocked.Decrement(ref _current);
         if (current < 0)
         {
@@ -70,6 +76,22 @@ internal sealed class WorkerCapacity
         }
 
         _semaphore.Release();
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        _semaphore.Dispose();
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            throw new ObjectDisposedException(nameof(WorkerCapacity));
+        }
     }
 }
 

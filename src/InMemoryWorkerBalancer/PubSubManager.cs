@@ -21,6 +21,7 @@ public sealed class PubSubManager : IPubSubManager
     private readonly ILogger _logger;
     private readonly IWorkerPayloadSerializer _serializer;
     private readonly Task _dispatchTask;
+    private readonly SubscriptionDefaults _subscriptionDefaults;
     private int _disposed;
 
     /// <summary>
@@ -38,6 +39,16 @@ public sealed class PubSubManager : IPubSubManager
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        if (options.Serializer is null)
+        {
+            throw new ArgumentNullException(nameof(options.Serializer), "Serializer must be configured.");
+        }
+
+        if (options.Logger is null)
+        {
+            throw new ArgumentNullException(nameof(options.Logger), "Logger must be configured.");
+        }
+
         _serializer = options.Serializer;
         _logger = options.Logger;
 
@@ -47,8 +58,9 @@ public sealed class PubSubManager : IPubSubManager
             SingleWriter = false
         });
 
-        _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger);
+        _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger, options.AckMonitorInterval);
         AttachWorkerLifecycleHandlers(options);
+        _subscriptionDefaults = options.BuildSubscriptionDefaults();
         _dispatchTask = Task.Factory.StartNew(
                 () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
                 CancellationToken.None,
@@ -134,10 +146,10 @@ public sealed class PubSubManager : IPubSubManager
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var options = SubscriptionOptions.Create();
+        var options = SubscriptionOptions.Create(_subscriptionDefaults);
         configure?.Invoke(options);
 
-        var endpoint = _workerManager.AddWorker(CreateHandler(handler), options);
+        var endpoint = await _workerManager.AddWorkerAsync(CreateHandler(handler), options);
         var subscription = new PubSubSubscription(this, endpoint.Id);
 
         if (!_subscriptions.TryAdd(subscription.Id, subscription))
@@ -158,10 +170,7 @@ public sealed class PubSubManager : IPubSubManager
         Action<SubscriptionOptions>? configure,
         CancellationToken cancellationToken = default)
     {
-        if (handler is null)
-        {
-            throw new ArgumentNullException(nameof(handler));
-        }
+        ArgumentNullException.ThrowIfNull(handler);
 
         return SubscribeAsync<T>(handler.HandleAsync, configure, cancellationToken);
     }
@@ -172,9 +181,7 @@ public sealed class PubSubManager : IPubSubManager
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
             return;
-        }
 
         await _cancellation.CancelAsync().ConfigureAwait(false);
         _channel.Writer.TryComplete();
@@ -204,9 +211,7 @@ public sealed class PubSubManager : IPubSubManager
         cancellationToken.ThrowIfCancellationRequested();
 
         if (_workerManager.TryAck(deliveryTag))
-        {
             return ValueTask.CompletedTask;
-        }
 
         throw new InvalidOperationException($"未找到待确认的消息，deliveryTag={deliveryTag}");
     }

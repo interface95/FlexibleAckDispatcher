@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using InMemoryWorkerBalancer.Internal;
 
@@ -9,12 +10,11 @@ namespace InMemoryWorkerBalancer;
 public readonly struct WorkerMessage<T>
 {
     private readonly WorkerDeliveryContext _context;
-    private readonly T _payload;
 
     internal WorkerMessage(WorkerDeliveryContext context, T payload)
     {
         _context = context;
-        _payload = payload;
+        Payload = payload;
     }
 
     /// <summary>
@@ -28,9 +28,14 @@ public readonly struct WorkerMessage<T>
     public long DeliveryTag => _context.DeliveryTag;
 
     /// <summary>
+    /// 消息处理启动时间（UTC）。
+    /// </summary>
+    public DateTimeOffset StartedAt => _context.StartedAt;
+
+    /// <summary>
     /// 消息负载。
     /// </summary>
-    public T Payload => _payload;
+    public T Payload { get; }
 
     /// <summary>
     /// 手动确认该消息。

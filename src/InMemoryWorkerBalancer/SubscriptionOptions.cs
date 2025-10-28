@@ -1,3 +1,5 @@
+using System;
+
 namespace InMemoryWorkerBalancer;
 
 /// <summary>
@@ -7,8 +9,38 @@ public sealed class SubscriptionOptions
 {
     private bool _hasCustomConcurrency;
 
-    private SubscriptionOptions()
+    private SubscriptionOptions(SubscriptionDefaults defaults)
     {
+        Prefetch = DefaultPrefetch;
+        ConcurrencyLimit = DefaultPrefetch;
+        HandlerTimeout = DefaultTimeout;
+        FailureThreshold = 3;
+        AckTimeout = null;
+
+        if (defaults.Prefetch.HasValue)
+        {
+            WithPrefetch(defaults.Prefetch.Value);
+        }
+
+        if (defaults.ConcurrencyLimit.HasValue)
+        {
+            WithConcurrencyLimit(defaults.ConcurrencyLimit.Value);
+        }
+
+        if (defaults.HandlerTimeout.HasValue)
+        {
+            WithHandlerTimeout(defaults.HandlerTimeout.Value);
+        }
+
+        if (defaults.FailureThreshold.HasValue)
+        {
+            WithFailureThreshold(defaults.FailureThreshold.Value);
+        }
+
+        if (defaults.AckTimeout.HasValue)
+        {
+            WithAckTimeout(defaults.AckTimeout.Value);
+        }
     }
 
     public const int DefaultPrefetch = 1;
@@ -40,7 +72,7 @@ public sealed class SubscriptionOptions
     /// </summary>
     public TimeSpan? AckTimeout { get; private set; }
 
-    public static SubscriptionOptions Defaults { get; } = new();
+    public static SubscriptionOptions Defaults { get; } = new(default);
 
     /// <summary>
     /// 设置 Prefetch，影响每次最多预取的消息数。
@@ -145,5 +177,16 @@ public sealed class SubscriptionOptions
     /// <summary>
     /// 快捷创建一个新的选项实例。
     /// </summary>
-    public static SubscriptionOptions Create() => new();
+    public static SubscriptionOptions Create() => new(default);
+
+    internal static SubscriptionOptions Create(SubscriptionDefaults defaults) => new(defaults);
+}
+
+internal readonly struct SubscriptionDefaults
+{
+    public int? Prefetch { get; init; }
+    public int? ConcurrencyLimit { get; init; }
+    public TimeSpan? HandlerTimeout { get; init; }
+    public int? FailureThreshold { get; init; }
+    public TimeSpan? AckTimeout { get; init; }
 }

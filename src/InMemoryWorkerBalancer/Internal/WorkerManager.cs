@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,16 +14,28 @@ namespace InMemoryWorkerBalancer.Internal;
 /// </summary>
 internal sealed class WorkerManager
 {
+    private static readonly TimeSpan MinimumAckMonitorInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan MaximumAckMonitorInterval = TimeSpan.FromSeconds(1);
+
     private readonly object _lock = new();
+    private readonly object _ackMonitorLock = new();
     private readonly List<WorkerEndpoint> _workers = new();
     private readonly Dictionary<int, WorkerEndpoint> _workerMap = new();
     private readonly ConcurrentDictionary<long, WorkerAckToken> _inFlight = new();
+    private readonly ConcurrentDictionary<long, AckTimeoutEntry> _ackTimeouts = new();
     private readonly Channel<WorkerEndpoint> _availableWorkers;
     private readonly CancellationToken _globalToken;
     private readonly ILogger _logger;
-    private readonly AckTimeoutScheduler _ackTimeoutScheduler;
+    private readonly TimeSpan? _configuredAckMonitorInterval;
+    private CancellationTokenSource? _ackMonitorCts;
+    private Task? _ackMonitorTask;
+    private TimeSpan? _effectiveAckMonitorInterval;
+    private int _ackMonitorStopped;
     private int _workerIdSeed;
     private int _availableWorkerCount;
+    private int _disposed;
+
+    private readonly record struct AckTimeoutEntry(int WorkerId, DateTimeOffset Deadline, TimeSpan Timeout);
 
     internal ILogger Logger => _logger;
 
@@ -35,8 +48,8 @@ internal sealed class WorkerManager
     /// Worker 移除事件（异步）。
     /// </summary>
     internal event Func<WorkerEndpointSnapshot, Task>? WorkerRemoved;
-    
-   /// <summary>
+
+    /// <summary>
     /// 当前空闲 Worker 数量。
     /// </summary>
     internal int AvailableWorkerCount => Math.Max(Volatile.Read(ref _availableWorkerCount), 0);
@@ -46,17 +59,17 @@ internal sealed class WorkerManager
     /// </summary>
     internal int InFlightCount => _inFlight.Count;
 
-    internal WorkerManager(CancellationToken globalToken, ILogger logger)
+    internal WorkerManager(CancellationToken globalToken, ILogger logger, TimeSpan? ackMonitorInterval)
     {
         _globalToken = globalToken;
         _logger = logger;
+        _configuredAckMonitorInterval = ackMonitorInterval;
 
         _availableWorkers = Channel.CreateUnbounded<WorkerEndpoint>(new UnboundedChannelOptions
         {
             SingleReader = false,
             SingleWriter = false
         });
-        _ackTimeoutScheduler = new AckTimeoutScheduler(this, _logger);
     }
 
     /// <summary>
@@ -79,59 +92,48 @@ internal sealed class WorkerManager
     /// <summary>
     /// 注册一个新的 Worker。
     /// </summary>
-    internal WorkerEndpoint AddWorker(WorkerProcessingDelegate handler, SubscriptionOptions options)
+    internal async ValueTask<WorkerEndpoint> AddWorkerAsync(WorkerProcessingDelegate handler, SubscriptionOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
-        WorkerEndpoint endpoint;
-
-        lock (_lock)
-        {
-            var workerId = ++_workerIdSeed;
-            var prefetch = options.Prefetch;
-            var concurrencyLimit = options.ConcurrencyLimit;
-
-            var channel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(prefetch)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = false,
-                SingleWriter = false
-            });
-
-            var capacity = new WorkerCapacity(concurrencyLimit);
-            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_globalToken);
-            endpoint = new WorkerEndpoint(workerId, channel, linkedCts, capacity)
-            {
-                Name = options.Name,
-                HandlerTimeout = options.HandlerTimeout,
-                FailureThreshold = options.FailureThreshold,
-                AckTimeout = options.AckTimeout
-            };
-            _workers.Add(endpoint);
-            _workerMap[workerId] = endpoint;
-        }
+        var endpoint = CreateWorkerEndpoint(options);
 
         var processor = new WorkerProcessor(endpoint, endpoint.Channel.Reader, handler, this);
         processor.Start();
 
-        // 异步触发事件，不阻塞当前调用
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await RaiseWorkerAddedAsync(endpoint).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error while raising WorkerAdded event for Worker {WorkerId}", endpoint.Id);
-            }
-        });
+        await RaiseWorkerAddedAsync(endpoint).ConfigureAwait(false);
 
         EnqueueAvailableWorker(endpoint);
-        _logger.LogInformation("Worker {WorkerId} added", endpoint.Id);
+        _logger.LogDebug("Worker {WorkerId} added", endpoint.Id);
+        return endpoint;
+    }
+
+    private WorkerEndpoint CreateWorkerEndpoint(SubscriptionOptions options)
+    {
+        var workerId = Interlocked.Increment(ref _workerIdSeed);
+        var channel = Channel.CreateBounded<ReadOnlyMemory<byte>>(new BoundedChannelOptions(options.Prefetch)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = false,
+            SingleWriter = false
+        });
+
+        var capacity = new WorkerCapacity(options.ConcurrencyLimit);
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_globalToken);
+        var endpoint = new WorkerEndpoint(workerId, channel, linkedCts, capacity)
+        {
+            Name = options.Name,
+            HandlerTimeout = options.HandlerTimeout,
+            FailureThreshold = options.FailureThreshold,
+            AckTimeout = options.AckTimeout
+        };
+
+        lock (_lock)
+        {
+            _workers.Add(endpoint);
+            _workerMap[workerId] = endpoint;
+        }
+
         return endpoint;
     }
 
@@ -153,7 +155,6 @@ internal sealed class WorkerManager
         _logger.LogDebug("Worker {WorkerId} acquired slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
 
         TryReturnIfCapacityAvailable(endpoint);
-        _ackTimeoutScheduler.Schedule(endpoint, token);
         return token;
     }
 
@@ -162,18 +163,18 @@ internal sealed class WorkerManager
     /// </summary>
     internal bool TryAck(long deliveryTag)
     {
-        if (_inFlight.TryRemove(deliveryTag, out var token))
+        if (!_inFlight.TryRemove(deliveryTag, out var token))
+            return false;
+
+        var result = token.TryAck();
+        if (!result)
         {
-            _ackTimeoutScheduler.Cancel(deliveryTag);
-            var result = token.TryAck();
-            if (!result)
-            {
-                _logger.LogWarning("Ack attempt ignored for deliveryTag {DeliveryTag}", deliveryTag);
-            }
-            return result;
+            _logger.LogWarning("Ack attempt ignored for deliveryTag {DeliveryTag}", deliveryTag);
         }
 
-        return false;
+        RemoveAckTimeout(deliveryTag);
+
+        return result;
     }
 
     /// <summary>
@@ -187,13 +188,19 @@ internal sealed class WorkerManager
     /// <summary>
     /// 在异常或取消时强制释放未确认的消息。
     /// </summary>
-    internal void ForceRelease(long deliveryTag)
+    internal void ForceRelease(long deliveryTag, string? reason = null)
     {
-        _ackTimeoutScheduler.Cancel(deliveryTag);
-        if (_inFlight.TryRemove(deliveryTag, out var token))
+        if (!_inFlight.TryRemove(deliveryTag, out var token)) 
+            return;
+        RemoveAckTimeout(deliveryTag);
+        token.ForceRelease();
+        if (string.IsNullOrEmpty(reason))
         {
-            token.ForceRelease();
             _logger.LogWarning("Force released deliveryTag {DeliveryTag}", deliveryTag);
+        }
+        else
+        {
+            _logger.LogWarning("Force released deliveryTag {DeliveryTag} ({Reason})", deliveryTag, reason);
         }
     }
 
@@ -224,10 +231,12 @@ internal sealed class WorkerManager
         {
             _logger.LogError(endpoint.Fault, "Worker {WorkerId} stopped with error", endpoint.Id);
         }
+
         endpoint.Cancellation.Dispose();
+        endpoint.Capacity.Dispose();
 
         await RaiseWorkerRemovedAsync(endpoint).ConfigureAwait(false);
-        _logger.LogInformation("Worker {WorkerId} removed", endpoint.Id);
+        _logger.LogDebug("Worker {WorkerId} removed", endpoint.Id);
         return true;
     }
 
@@ -236,23 +245,40 @@ internal sealed class WorkerManager
     /// </summary>
     internal bool TryRentAvailableWorker(out WorkerEndpoint endpoint)
     {
-        while (_availableWorkers.Reader.TryRead(out endpoint))
+        while (_availableWorkers.Reader.TryRead(out var candidate))
         {
             var remaining = Interlocked.Decrement(ref _availableWorkerCount);
             if (remaining < 0)
             {
                 Interlocked.Exchange(ref _availableWorkerCount, 0);
             }
-            if (!endpoint.IsActive)
+
+            if (!candidate.IsActive)
             {
                 continue;
             }
 
+            if (!IsEndpointActive(candidate))
+            {
+                continue;
+            }
+
+            endpoint = candidate;
             return true;
         }
 
         endpoint = null!;
         return false;
+    }
+
+    private bool IsEndpointActive(WorkerEndpoint endpoint)
+    {
+        lock (_lock)
+        {
+            return _workerMap.TryGetValue(endpoint.Id, out var current)
+                   && ReferenceEquals(current, endpoint)
+                   && current.IsActive;
+        }
     }
 
     /// <summary>
@@ -277,25 +303,23 @@ internal sealed class WorkerManager
     /// <param name="endpoint"></param>
     private void ReleaseWorker(WorkerEndpoint endpoint)
     {
-        if (endpoint.IsActive)
-        {
-            EnqueueAvailableWorker(endpoint);
-            _logger.LogTrace("Worker {WorkerId} returned to available pool", endpoint.Id);
-        }
+        if (!endpoint.IsActive) 
+            return;
+        
+        EnqueueAvailableWorker(endpoint);
+        _logger.LogTrace("Worker {WorkerId} returned to available pool", endpoint.Id);
     }
 
     private void TryReturnIfCapacityAvailable(WorkerEndpoint endpoint)
     {
         if (!endpoint.IsActive)
-        {
             return;
-        }
 
-        if (endpoint.Capacity.CurrentConnections < endpoint.Capacity.MaxConnections)
-        {
-            EnqueueAvailableWorker(endpoint);
-            _logger.LogTrace("Worker {WorkerId} still has capacity, re-queued for dispatch", endpoint.Id);
-        }
+        if (endpoint.Capacity.CurrentConnections >= endpoint.Capacity.MaxConnections)
+            return;
+        
+        EnqueueAvailableWorker(endpoint);
+        _logger.LogTrace("Worker {WorkerId} still has capacity, re-queued for dispatch", endpoint.Id);
     }
 
     private void EnqueueAvailableWorker(WorkerEndpoint endpoint)
@@ -303,6 +327,131 @@ internal sealed class WorkerManager
         if (_availableWorkers.Writer.TryWrite(endpoint))
         {
             Interlocked.Increment(ref _availableWorkerCount);
+        }
+    }
+
+    internal void RegisterAckTimeout(WorkerEndpoint endpoint, WorkerAckToken token)
+    {
+        if (endpoint.AckTimeout is null || token.IsAcknowledged)
+            return;
+
+        var timeout = endpoint.AckTimeout.Value;
+        EnsureAckMonitorStarted(timeout);
+
+        if (_ackMonitorTask is null)
+        {
+            // 未配置 Ack 监控时，仅记录日志提醒。
+            _logger.LogDebug("Ack timeout monitoring disabled; deliveryTag {DeliveryTag} will not auto-release.", token.DeliveryTag);
+            return;
+        }
+
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        _ackTimeouts[token.DeliveryTag] = new AckTimeoutEntry(endpoint.Id, deadline, timeout);
+    }
+
+    private void EnsureAckMonitorStarted(TimeSpan ackTimeout)
+    {
+        if (_ackMonitorTask is not null)
+            return;
+
+        lock (_ackMonitorLock)
+        {
+            if (_ackMonitorTask is not null)
+                return;
+
+            var interval = _configuredAckMonitorInterval ?? CalculateAckMonitorInterval(ackTimeout);
+            _effectiveAckMonitorInterval = interval;
+            _ackMonitorCts = new CancellationTokenSource();
+            Volatile.Write(ref _ackMonitorStopped, 0);
+            
+            _ackMonitorTask = Task.Factory.StartNew(
+                () => MonitorAckTimeoutsAsync(_ackMonitorCts!, interval),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Unwrap();
+        }
+    }
+
+    private static TimeSpan CalculateAckMonitorInterval(TimeSpan ackTimeout)
+    {
+        var milliseconds = ackTimeout.TotalMilliseconds / 10d;
+        if (double.IsNaN(milliseconds) || double.IsInfinity(milliseconds) || milliseconds <= 0)
+        {
+            milliseconds = MinimumAckMonitorInterval.TotalMilliseconds;
+        }
+
+        milliseconds = Math.Clamp(milliseconds, MinimumAckMonitorInterval.TotalMilliseconds, MaximumAckMonitorInterval.TotalMilliseconds);
+        return TimeSpan.FromMilliseconds(milliseconds);
+    }
+
+    private void RemoveAckTimeout(long deliveryTag)
+    {
+        _ackTimeouts.TryRemove(deliveryTag, out _);
+    }
+
+    private async Task MonitorAckTimeoutsAsync(CancellationTokenSource cts, TimeSpan interval)
+    {
+        using var timer = new PeriodicTimer(interval);
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cts.Token).ConfigureAwait(false))
+            {
+                if (_ackTimeouts.IsEmpty)
+                {
+                    continue;
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                foreach (var kvp in _ackTimeouts)
+                {
+                    if (kvp.Value.Deadline <= now && _ackTimeouts.TryRemove(kvp.Key, out var entry))
+                    {
+                        ForceRelease(kvp.Key, $"ack timeout after {entry.Timeout}");
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task ShutdownAckTimeoutMonitorAsync()
+    {
+        if (_ackMonitorTask is null || _ackMonitorCts is null)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _ackMonitorStopped, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _ackMonitorCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        try
+        {
+            await _ackMonitorTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            _ackMonitorCts.Dispose();
+            _ackTimeouts.Clear();
+            _ackMonitorCts = null;
+            _ackMonitorTask = null;
+            _effectiveAckMonitorInterval = null;
+            Volatile.Write(ref _ackMonitorStopped, 0);
         }
     }
 
@@ -328,6 +477,11 @@ internal sealed class WorkerManager
     /// </summary>
     internal async Task StopAllAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         WorkerEndpoint[] snapshot;
         lock (_lock)
         {
@@ -345,10 +499,11 @@ internal sealed class WorkerManager
         foreach (var endpoint in snapshot)
         {
             endpoint.Cancellation.Dispose();
+            endpoint.Capacity.Dispose();
         }
 
         Interlocked.Exchange(ref _availableWorkerCount, 0);
-        _ackTimeoutScheduler.Reset();
+        await ShutdownAckTimeoutMonitorAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -385,7 +540,8 @@ internal sealed class WorkerManager
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception occurred in WorkerAdded event handler for Worker {WorkerId}", endpoint.Id);
+                _logger.LogError(ex, "Exception occurred in WorkerAdded event handler for Worker {WorkerId}",
+                    endpoint.Id);
             }
         }
     }
@@ -410,12 +566,14 @@ internal sealed class WorkerManager
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception occurred in WorkerRemoved event handler for Worker {WorkerId}", endpoint.Id);
+                _logger.LogError(ex, "Exception occurred in WorkerRemoved event handler for Worker {WorkerId}",
+                    endpoint.Id);
             }
         }
     }
 
-    internal async ValueTask ReturnPayloadAsync(WorkerEndpoint endpoint, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    internal async ValueTask ReturnPayloadAsync(WorkerEndpoint endpoint, ReadOnlyMemory<byte> payload,
+        CancellationToken cancellationToken)
     {
         if (endpoint.IsActive)
         {
@@ -427,14 +585,4 @@ internal sealed class WorkerManager
         }
     }
 
-    internal async Task HandleAckTimeoutAsync(WorkerEndpoint endpoint, WorkerAckToken token)
-    {
-        if (_inFlight.TryRemove(token.DeliveryTag, out var current))
-        {
-            current.ForceRelease();
-            _logger.LogWarning("Worker {WorkerId} deliveryTag {DeliveryTag} released due to ACK timeout", endpoint.Id, token.DeliveryTag);
-        }
-
-        await Task.CompletedTask;
-    }
 }

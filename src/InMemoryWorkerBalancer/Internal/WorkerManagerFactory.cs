@@ -12,11 +12,13 @@ internal static class WorkerManagerFactory
     /// </summary>
     internal static WorkerManager CreateManager(
         CancellationToken globalToken,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        TimeSpan? ackMonitorInterval = null)
     {
         return new WorkerManager(
             globalToken,
-            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            ackMonitorInterval);
     }
 }
 

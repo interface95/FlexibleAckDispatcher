@@ -7,11 +7,15 @@ namespace InMemoryWorkerBalancer.Internal;
 /// </summary>
 internal sealed class ReusableTimeoutScope : IDisposable
 {
+    private const int MaxPoolSize = 100;
+
     private static readonly ConcurrentQueue<ReusableTimeoutScope> Pool = new();
+    private static int _poolCount;
 
     private CancellationTokenSource _cts = new();
     private CancellationTokenSource? _linkedCts;
     private bool _inUse;
+    private bool _pooled;
 
     private ReusableTimeoutScope()
     {
@@ -24,7 +28,19 @@ internal sealed class ReusableTimeoutScope : IDisposable
     {
         if (!Pool.TryDequeue(out var scope))
         {
-            scope = new ReusableTimeoutScope();
+            if (Interlocked.Increment(ref _poolCount) <= MaxPoolSize)
+            {
+                scope = new ReusableTimeoutScope { _pooled = true };
+            }
+            else
+            {
+                Interlocked.Decrement(ref _poolCount);
+                scope = new ReusableTimeoutScope { _pooled = false };
+            }
+        }
+        else
+        {
+            scope._pooled = true;
         }
 
         scope._inUse = true;
@@ -55,6 +71,14 @@ internal sealed class ReusableTimeoutScope : IDisposable
         }
 
         _inUse = false;
-        Pool.Enqueue(this);
+
+        if (_pooled)
+        {
+            Pool.Enqueue(this);
+        }
+        else
+        {
+            _cts.Dispose();
+        }
     }
 }

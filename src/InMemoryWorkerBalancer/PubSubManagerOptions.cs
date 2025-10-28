@@ -16,6 +16,12 @@ public sealed class PubSubManagerOptions
     private readonly List<Func<WorkerEndpointSnapshot, Task>> _workerRemovedHandlers = new();
     private IWorkerPayloadSerializer _serializer = JsonWorkerPayloadSerializer.Default;
     private ILogger _logger = NullLogger.Instance;
+    private TimeSpan? _ackMonitorInterval;
+    private int? _defaultPrefetch;
+    private int? _defaultConcurrencyLimit;
+    private TimeSpan? _defaultHandlerTimeout;
+    private int? _defaultFailureThreshold;
+    private TimeSpan? _defaultAckTimeout;
 
     /// <summary>
     /// 配置自定义序列化器，默认使用 <see cref="JsonWorkerPayloadSerializer.Default"/>。
@@ -63,6 +69,91 @@ public sealed class PubSubManagerOptions
         return this;
     }
 
+    /// <summary>
+    /// 配置 ACK 定时检测的全局轮询间隔；默认值为 <c>null</c>，表示按订阅的 AckTimeout 自动推导。
+    /// </summary>
+    public PubSubManagerOptions WithAckMonitorInterval(TimeSpan? interval)
+    {
+        if (interval.HasValue && interval.Value <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(interval), "Ack monitor interval must be greater than zero.");
+        }
+
+        _ackMonitorInterval = interval;
+        return this;
+    }
+
+    /// <summary>
+    /// 配置默认的 Prefetch 数量，供未显式指定的订阅使用。
+    /// </summary>
+    public PubSubManagerOptions WithDefaultPrefetch(int prefetch)
+    {
+        if (prefetch <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(prefetch), "Prefetch must be greater than zero.");
+        }
+
+        _defaultPrefetch = prefetch;
+        return this;
+    }
+
+    /// <summary>
+    /// 配置默认的并发上限。
+    /// </summary>
+    public PubSubManagerOptions WithDefaultConcurrencyLimit(int limit)
+    {
+        if (limit <= 0 || limit > SubscriptionOptions.MaxConcurrencyLimit)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit),
+                $"Concurrency limit must be between 1 and {SubscriptionOptions.MaxConcurrencyLimit}.");
+        }
+
+        _defaultConcurrencyLimit = limit;
+        return this;
+    }
+
+    /// <summary>
+    /// 配置默认的处理超时时间。
+    /// </summary>
+    public PubSubManagerOptions WithDefaultHandlerTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), "Handler timeout must be greater than zero.");
+        }
+
+        _defaultHandlerTimeout = timeout;
+        return this;
+    }
+
+    /// <summary>
+    /// 配置默认的失败阈值。
+    /// </summary>
+    public PubSubManagerOptions WithDefaultFailureThreshold(int threshold)
+    {
+        if (threshold <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(threshold), "Failure threshold must be greater than zero.");
+        }
+
+        _defaultFailureThreshold = threshold;
+        return this;
+    }
+
+    /// <summary>
+    /// 配置默认的 ACK 超时时间。
+    /// </summary>
+    public PubSubManagerOptions WithDefaultAckTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), "Ack timeout must be greater than zero.");
+        }
+
+        _defaultAckTimeout = timeout;
+        return this;
+    }
+
     internal IWorkerPayloadSerializer Serializer => _serializer;
 
     internal ILogger Logger => _logger;
@@ -70,6 +161,17 @@ public sealed class PubSubManagerOptions
     internal IReadOnlyList<Func<WorkerEndpointSnapshot, Task>> WorkerAddedHandlers => _workerAddedHandlers;
 
     internal IReadOnlyList<Func<WorkerEndpointSnapshot, Task>> WorkerRemovedHandlers => _workerRemovedHandlers;
+
+    internal TimeSpan? AckMonitorInterval => _ackMonitorInterval;
+
+    internal SubscriptionDefaults BuildSubscriptionDefaults() => new()
+    {
+        Prefetch = _defaultPrefetch,
+        ConcurrencyLimit = _defaultConcurrencyLimit,
+        HandlerTimeout = _defaultHandlerTimeout,
+        FailureThreshold = _defaultFailureThreshold,
+        AckTimeout = _defaultAckTimeout
+    };
 
     internal void Validate()
     {

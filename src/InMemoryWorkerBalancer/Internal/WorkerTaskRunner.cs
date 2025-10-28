@@ -1,55 +1,77 @@
+using System;
+using System.Threading;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer.Internal;
 
-internal sealed class WorkerProcessingTask
+internal sealed class WorkerTaskRunner
 {
     private readonly WorkerEndpoint _endpoint;
     private readonly ChannelReader<ReadOnlyMemory<byte>> _reader;
     private readonly WorkerProcessingDelegate _handler;
     private readonly WorkerManager _workerManager;
-    private readonly Func<bool> _isStopped;
-    private readonly Action _reportFailure;
+    private int _failureCount;
+    private volatile bool _isStopped;
+    private DateTimeOffset _currentTaskStartedAt;
 
-    public WorkerProcessingTask(
+    public WorkerTaskRunner(
         WorkerEndpoint endpoint,
         ChannelReader<ReadOnlyMemory<byte>> reader,
         WorkerProcessingDelegate handler,
-        WorkerManager workerManager,
-        Func<bool> isStopped,
-        Action reportFailure)
+        WorkerManager workerManager)
     {
         _endpoint = endpoint;
         _reader = reader;
         _handler = handler;
         _workerManager = workerManager;
-        _isStopped = isStopped;
-        _reportFailure = reportFailure;
     }
 
-    public async Task RunAsync(CancellationToken cancellationToken)
+    public bool IsStopped => _isStopped;
+
+    public int FailureCount => Volatile.Read(ref _failureCount);
+
+    public TimeSpan CurrentTaskDuration =>
+        _currentTaskStartedAt == default
+            ? TimeSpan.Zero
+            : DateTimeOffset.UtcNow - _currentTaskStartedAt;
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        return Task.Factory.StartNew(
+                () => ProcessAsync(cancellationToken),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default).Unwrap();
+    }
+
+    private async Task ProcessAsync(CancellationToken cancellationToken)
     {
         try
         {
-            while (!_isStopped() && await _reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            while (!_isStopped && await _reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                while (!_isStopped() && _reader.TryRead(out var payload))
+                while (!_isStopped && _reader.TryRead(out var payload))
                 {
                     WorkerAckToken? token = null;
                     try
                     {
+                        _currentTaskStartedAt = DateTimeOffset.UtcNow;
                         token = await _workerManager.RegisterInFlightAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
                         _workerManager.Logger.LogDebug("Worker {WorkerId} handling deliveryTag {DeliveryTag}", _endpoint.Id, token.DeliveryTag);
 
                         await ExecuteWithTimeoutAsync(token, cancellationToken).ConfigureAwait(false);
+                        _workerManager.RegisterAckTimeout(_endpoint, token);
+                        _currentTaskStartedAt = default;
                     }
                     catch (Exception ex)
                     {
-                        _reportFailure();
+                        HandleFailure();
+                        _currentTaskStartedAt = default;
+
                         if (token is not null)
                         {
-                            _workerManager.ForceRelease(token.DeliveryTag);
+                            _workerManager.ForceRelease(token.DeliveryTag, "handler failure");
                         }
                         else if (!cancellationToken.IsCancellationRequested)
                         {
@@ -71,6 +93,12 @@ internal sealed class WorkerProcessingTask
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (Exception ex)
+        {
+            HandleFailure();
+            _workerManager.Logger.LogError(ex, "Unexpected error in worker loop for Worker {WorkerId}", _endpoint.Id);
+            throw;
+        }
     }
 
     private async Task ExecuteWithTimeoutAsync(WorkerAckToken token, CancellationToken outerCancellationToken)
@@ -79,7 +107,7 @@ internal sealed class WorkerProcessingTask
 
         try
         {
-            var context = new WorkerDeliveryContext(token, _workerManager.TryAck);
+            var context = new WorkerDeliveryContext(token, _workerManager.TryAck, _currentTaskStartedAt);
             await _handler(context, linkedToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!outerCancellationToken.IsCancellationRequested && linkedToken.IsCancellationRequested)
@@ -90,6 +118,34 @@ internal sealed class WorkerProcessingTask
                 token.DeliveryTag,
                 _endpoint.HandlerTimeout);
             throw;
+        }
+    }
+
+    private void HandleFailure()
+    {
+        var failures = Interlocked.Increment(ref _failureCount);
+        if (failures < _endpoint.FailureThreshold || _isStopped)
+        {
+            return;
+        }
+
+        _isStopped = true;
+        _workerManager.Logger.LogError(
+            "Worker {WorkerId} reached failure threshold {Threshold} and will stop.",
+            _endpoint.Id,
+            _endpoint.FailureThreshold);
+
+        if (_endpoint.Cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            _endpoint.Cancellation.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 }

@@ -6,7 +6,14 @@ namespace InMemoryWorkerBalancer.Internal;
 internal sealed class WorkerAckToken
 {
     private readonly Action _release;
-    private int _state; // 0: pending, 1: acked, 2: released
+    private int _state;
+
+    private enum TokenState
+    {
+        Pending = 0,
+        Acknowledged = 1,
+        Released = 2
+    }
 
     /// <summary>
     /// 构造一个新的 Ack token。
@@ -37,14 +44,14 @@ internal sealed class WorkerAckToken
     /// <summary>
     /// 当前是否已经确认。
     /// </summary>
-    public bool IsAcknowledged => Volatile.Read(ref _state) == 1;
+    public bool IsAcknowledged => (TokenState)Volatile.Read(ref _state) == TokenState.Acknowledged;
 
     /// <summary>
     /// 尝试确认该消息。
     /// </summary>
     public bool TryAck()
     {
-        if (Interlocked.CompareExchange(ref _state, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref _state, (int)TokenState.Acknowledged, (int)TokenState.Pending) != (int)TokenState.Pending)
         {
             return false;
         }
@@ -58,7 +65,7 @@ internal sealed class WorkerAckToken
     /// </summary>
     public void ForceRelease()
     {
-        if (Interlocked.Exchange(ref _state, 2) == 0)
+        if (Interlocked.Exchange(ref _state, (int)TokenState.Released) == (int)TokenState.Pending)
         {
             _release();
         }

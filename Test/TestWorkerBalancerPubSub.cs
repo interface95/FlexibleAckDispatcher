@@ -20,7 +20,8 @@ public sealed class TestWorkerBalancerPubSub
     {
         const int totalMessages = 20;
         const int prefetch = 2;
-        await using var manager = PubSubManager.Create();
+        await using var manager = PubSubManager.Create(options =>
+            options.WithAckMonitorInterval(TimeSpan.FromMilliseconds(50)));
 
         var processed = 0;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -81,7 +82,7 @@ public sealed class TestWorkerBalancerPubSub
         await manager.PublishAsync(1);
         await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
-        await Task.Delay(300); // 等待 ACK 超时触发
+        await Task.Delay(800); // 等待 ACK 超时触发
 
         Assert.AreEqual(0, manager.RunningTaskCount, "ACK 超时后仍有任务占用并发槽位");
         Assert.IsTrue(manager.IdleWorkerCount >= 1, "ACK 超时应释放 Worker 并回到空闲池");

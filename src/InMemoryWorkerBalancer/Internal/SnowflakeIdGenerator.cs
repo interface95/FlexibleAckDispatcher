@@ -4,6 +4,7 @@ namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 简易的自增 ID 生成器，用于生产全局唯一的 deliveryTag。
+/// 保证生成的 ID 始终为正数，并在溢出时安全地回绕。
 /// </summary>
 internal static class SnowflakeIdGenerator
 {
@@ -14,14 +15,22 @@ internal static class SnowflakeIdGenerator
     /// </summary>
     public static long NextId()
     {
-        while (true)
+        var next = Interlocked.Increment(ref _current);
+        if (next > 0)
         {
-            var current = Volatile.Read(ref _current);
-            var next = current == long.MaxValue ? 1 : current + 1;
-            if (Interlocked.CompareExchange(ref _current, next, current) == current)
+            return next;
+        }
+
+        // 溢出：将计数器重置为 1，避免返回非正数。
+        lock (typeof(SnowflakeIdGenerator))
+        {
+            if (_current <= 0)
             {
-                return next;
+                _current = 1;
+                return 1;
             }
+
+            return _current;
         }
     }
 }

@@ -11,10 +11,11 @@ internal readonly struct WorkerDeliveryContext
     private readonly WorkerAckToken _token;
     private readonly Func<long, bool> _ackCallback;
 
-    public WorkerDeliveryContext(WorkerAckToken token, Func<long, bool> ackCallback)
+    public WorkerDeliveryContext(WorkerAckToken token, Func<long, bool> ackCallback, DateTimeOffset startedAt)
     {
         _token = token;
         _ackCallback = ackCallback;
+        StartedAt = startedAt;
     }
 
     public int WorkerId => _token.WorkerId;
@@ -22,6 +23,8 @@ internal readonly struct WorkerDeliveryContext
     public long DeliveryTag => _token.DeliveryTag;
 
     public ReadOnlyMemory<byte> Payload => _token.Payload;
+
+    public DateTimeOffset StartedAt { get; }
 
     public ValueTask AckAsync()
     {
