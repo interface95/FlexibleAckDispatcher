@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +22,8 @@ internal sealed class WorkerManager
     private readonly Dictionary<int, WorkerEndpoint> _workerMap = new();
     private readonly ConcurrentDictionary<long, WorkerAckToken> _inFlight = new();
     private readonly ConcurrentDictionary<long, AckTimeoutEntry> _ackTimeouts = new();
-    private readonly Channel<WorkerEndpoint> _availableWorkers;
+    private readonly PriorityQueue<WorkerEndpoint, int> _availableWorkers = new();
+    private readonly SemaphoreSlim _availableWorkerSignal = new(0);
     private readonly CancellationToken _globalToken;
     private readonly ILogger _logger;
     private readonly TimeSpan? _configuredAckMonitorInterval;
@@ -64,12 +64,6 @@ internal sealed class WorkerManager
         _globalToken = globalToken;
         _logger = logger;
         _configuredAckMonitorInterval = ackMonitorInterval;
-
-        _availableWorkers = Channel.CreateUnbounded<WorkerEndpoint>(new UnboundedChannelOptions
-        {
-            SingleReader = false,
-            SingleWriter = false
-        });
     }
 
     /// <summary>
@@ -245,40 +239,41 @@ internal sealed class WorkerManager
     /// </summary>
     internal bool TryRentAvailableWorker(out WorkerEndpoint endpoint)
     {
-        while (_availableWorkers.Reader.TryRead(out var candidate))
+        endpoint = null!;
+
+        if (!_availableWorkerSignal.Wait(0))
         {
-            var remaining = Interlocked.Decrement(ref _availableWorkerCount);
-            if (remaining < 0)
-            {
-                Interlocked.Exchange(ref _availableWorkerCount, 0);
-            }
-
-            if (!candidate.IsActive)
-            {
-                continue;
-            }
-
-            if (!IsEndpointActive(candidate))
-            {
-                continue;
-            }
-
-            endpoint = candidate;
-            return true;
+            return false;
         }
 
-        endpoint = null!;
-        return false;
-    }
-
-    private bool IsEndpointActive(WorkerEndpoint endpoint)
-    {
         lock (_lock)
         {
-            return _workerMap.TryGetValue(endpoint.Id, out var current)
-                   && ReferenceEquals(current, endpoint)
-                   && current.IsActive;
+            while (_availableWorkers.TryDequeue(out var candidate, out _))
+            {
+                Interlocked.Decrement(ref _availableWorkerCount);
+
+                if (!_workerMap.TryGetValue(candidate.Id, out var current) || !ReferenceEquals(current, candidate))
+                {
+                    continue;
+                }
+
+                if (!current.IsActive)
+                {
+                    continue;
+                }
+
+                if (current.Capacity.CurrentConnections >= current.Capacity.MaxConnections)
+                {
+                    continue;
+                }
+
+                endpoint = current;
+                return true;
+            }
         }
+
+        _availableWorkerSignal.Release();
+        return false;
     }
 
     /// <summary>
@@ -286,15 +281,8 @@ internal sealed class WorkerManager
     /// </summary>
     internal async Task WaitForWorkerAvailableAsync(CancellationToken cancellationToken)
     {
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (await _availableWorkers.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                return;
-            }
-        }
+        await _availableWorkerSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _availableWorkerSignal.Release();
     }
 
     /// <summary>
@@ -324,10 +312,24 @@ internal sealed class WorkerManager
 
     private void EnqueueAvailableWorker(WorkerEndpoint endpoint)
     {
-        if (_availableWorkers.Writer.TryWrite(endpoint))
+        if (!endpoint.IsActive)
         {
-            Interlocked.Increment(ref _availableWorkerCount);
+            return;
         }
+
+        var current = endpoint.Capacity.CurrentConnections;
+        if (current >= endpoint.Capacity.MaxConnections)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            _availableWorkers.Enqueue(endpoint, current);
+        }
+
+        Interlocked.Increment(ref _availableWorkerCount);
+        _availableWorkerSignal.Release();
     }
 
     internal void RegisterAckTimeout(WorkerEndpoint endpoint, WorkerAckToken token)
