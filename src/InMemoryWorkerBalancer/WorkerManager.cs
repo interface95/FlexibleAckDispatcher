@@ -24,14 +24,14 @@ public sealed class WorkerManager<T>
     internal ILogger Logger => _logger;
 
     /// <summary>
-    /// Worker 添加事件。
+    /// Worker 添加事件（异步）。
     /// </summary>
-    public event Action<WorkerEndpoint<T>>? WorkerAdded;
+    public event Func<WorkerEndpoint<T>, Task>? WorkerAdded;
 
     /// <summary>
-    /// Worker 移除事件。
+    /// Worker 移除事件（异步）。
     /// </summary>
-    public event Action<WorkerEndpoint<T>>? WorkerRemoved;
+    public event Func<WorkerEndpoint<T>, Task>? WorkerRemoved;
 
     public WorkerManager(CancellationToken globalToken, ILogger logger)
     {
@@ -84,7 +84,20 @@ public sealed class WorkerManager<T>
 
         var processor = new WorkerProcessor<T>(endpoint, endpoint.Channel.Reader, handler, this);
         processor.Start();
-        RaiseWorkerAdded(endpoint);
+        
+        // 异步触发事件，不阻塞当前调用
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RaiseWorkerAddedAsync(endpoint).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error while raising WorkerAdded event for Worker {WorkerId}", endpoint.Id);
+            }
+        });
+        
         _availableWorkers.Writer.TryWrite(endpoint);
         _logger.LogInformation("Worker {WorkerId} added", endpoint.Id);
         return endpoint;
@@ -173,7 +186,7 @@ public sealed class WorkerManager<T>
 
         await endpoint.WaitForCompletionAsync().ConfigureAwait(false);
 
-        RaiseWorkerRemoved(endpoint);
+        await RaiseWorkerRemovedAsync(endpoint).ConfigureAwait(false);
         _logger.LogInformation("Worker {WorkerId} removed", endpoint.Id);
         return true;
     }
@@ -297,9 +310,9 @@ public sealed class WorkerManager<T>
     }
 
     /// <summary>
-    /// 安全触发 WorkerAdded 事件，捕获订阅者抛出的异常。
+    /// 安全触发 WorkerAdded 事件（异步），捕获订阅者抛出的异常。
     /// </summary>
-    private void RaiseWorkerAdded(WorkerEndpoint<T> endpoint)
+    private async Task RaiseWorkerAddedAsync(WorkerEndpoint<T> endpoint)
     {
         var handlers = WorkerAdded;
         if (handlers == null)
@@ -311,7 +324,7 @@ public sealed class WorkerManager<T>
         {
             try
             {
-                ((Action<WorkerEndpoint<T>>)handler).Invoke(endpoint);
+                await ((Func<WorkerEndpoint<T>, Task>)handler).Invoke(endpoint).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -321,9 +334,9 @@ public sealed class WorkerManager<T>
     }
 
     /// <summary>
-    /// 安全触发 WorkerRemoved 事件，捕获订阅者抛出的异常。
+    /// 安全触发 WorkerRemoved 事件（异步），捕获订阅者抛出的异常。
     /// </summary>
-    private void RaiseWorkerRemoved(WorkerEndpoint<T> endpoint)
+    private async Task RaiseWorkerRemovedAsync(WorkerEndpoint<T> endpoint)
     {
         var handlers = WorkerRemoved;
         if (handlers == null)
@@ -335,7 +348,7 @@ public sealed class WorkerManager<T>
         {
             try
             {
-                ((Action<WorkerEndpoint<T>>)handler).Invoke(endpoint);
+                await ((Func<WorkerEndpoint<T>, Task>)handler).Invoke(endpoint).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
