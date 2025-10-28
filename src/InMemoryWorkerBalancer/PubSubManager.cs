@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using InMemoryWorkerBalancer.Abstractions;
 using Microsoft.Extensions.Logging;
-using WorkerBalancer.Abstractions;
-using WorkerBalancer.Internal;
+using InMemoryWorkerBalancer.Internal;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 发布-订阅管理器，负责调度消息并维护 Worker。

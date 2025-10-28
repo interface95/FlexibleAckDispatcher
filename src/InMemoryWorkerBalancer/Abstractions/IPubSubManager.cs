@@ -1,4 +1,4 @@
-namespace WorkerBalancer.Abstractions;
+namespace InMemoryWorkerBalancer.Abstractions;
 
 /// <summary>
 /// 发布订阅管理器，对外提供订阅、发布能力。

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
-namespace WorkerBalancer.Internal;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// Worker 的处理器：从专属通道读取消息并调用处理委托。

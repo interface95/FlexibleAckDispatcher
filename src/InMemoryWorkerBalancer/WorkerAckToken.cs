@@ -1,6 +1,6 @@
 using System.Threading;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 代表一条正在处理的消息，用于手动确认和容量释放。

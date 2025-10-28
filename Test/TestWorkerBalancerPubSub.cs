@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
 using System.Linq;
-using WorkerBalancer;
-using WorkerBalancer.Abstractions;
+using InMemoryWorkerBalancer;
+using InMemoryWorkerBalancer.Abstractions;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace TestProject2;
 

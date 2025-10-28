@@ -1,6 +1,6 @@
 using System.Threading;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// Worker 的容量控制器，限制同一时间正在处理的消息数量。

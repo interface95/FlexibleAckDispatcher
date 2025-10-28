@@ -1,7 +1,7 @@
 using System.Threading.Channels;
-using WorkerBalancer.Internal;
+using InMemoryWorkerBalancer.Internal;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 负责从主通道读取消息并分配给可用 Worker。

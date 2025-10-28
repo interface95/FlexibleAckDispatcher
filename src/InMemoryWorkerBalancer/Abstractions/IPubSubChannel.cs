@@ -1,4 +1,4 @@
-namespace WorkerBalancer.Abstractions;
+namespace InMemoryWorkerBalancer.Abstractions;
 
 /// <summary>
 /// 生产者用于发布消息的通道接口。

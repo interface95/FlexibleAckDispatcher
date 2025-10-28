@@ -1,4 +1,4 @@
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 订阅选项，支持以构建者模式配置各项参数。

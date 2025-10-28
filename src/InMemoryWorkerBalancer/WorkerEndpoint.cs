@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 表示一个 Worker 的运行时上下文，包含专属队列、运行任务等信息。

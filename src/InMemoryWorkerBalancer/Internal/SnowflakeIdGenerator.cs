@@ -1,6 +1,6 @@
 using System.Threading;
 
-namespace WorkerBalancer.Internal;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 简易的自增 ID 生成器，用于生产全局唯一的 deliveryTag。

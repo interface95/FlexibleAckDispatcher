@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 工厂方法，用于创建默认的 <see cref="WorkerManager{T}"/> 实例。

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace WorkerBalancer.Internal;
+namespace InMemoryWorkerBalancer.Internal;
 
 /// <summary>
 /// 可复用的超时包装器：为 handler 创建带超时的取消令牌，处理完毕后归还对象池。

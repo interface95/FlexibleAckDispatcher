@@ -2,10 +2,10 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using InMemoryWorkerBalancer.Internal;
 using Microsoft.Extensions.Logging;
-using WorkerBalancer.Internal;
 
-namespace WorkerBalancer;
+namespace InMemoryWorkerBalancer;
 
 /// <summary>
 /// 管理 Worker 生命周期与消息调度的核心类。

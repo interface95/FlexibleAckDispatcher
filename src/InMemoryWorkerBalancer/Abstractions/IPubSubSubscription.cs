@@ -1,4 +1,4 @@
-namespace WorkerBalancer.Abstractions;
+namespace InMemoryWorkerBalancer.Abstractions;
 
 /// <summary>
 /// 表示一个订阅者句柄，可用于取消订阅。

@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace WorkerBalancer.Abstractions;
+namespace InMemoryWorkerBalancer.Abstractions;
 
 /// <summary>
 /// 统一的处理程序接口，外部实现后可被订阅注册使用。
