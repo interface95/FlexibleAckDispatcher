@@ -115,9 +115,9 @@ public sealed class SubscriptionOptions
     /// </summary>
     public SubscriptionOptions WithFailureThreshold(int threshold)
     {
-        if (threshold <= 0)
+        if (threshold <= 0 || threshold > 10)
         {
-            throw new ArgumentOutOfRangeException(nameof(threshold), "Failure threshold must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(threshold), "Failure threshold must be between 1 and 10.");
         }
 
         FailureThreshold = threshold;

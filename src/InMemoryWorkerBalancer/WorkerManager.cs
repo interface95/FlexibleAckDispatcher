@@ -33,6 +33,12 @@ public sealed class WorkerManager<T>
     /// </summary>
     public event Func<WorkerEndpoint<T>, Task>? WorkerRemoved;
 
+    public void ClearEventHandlers()
+    {
+        WorkerAdded = null;
+        WorkerRemoved = null;
+    }
+
     public WorkerManager(CancellationToken globalToken, ILogger logger)
     {
         _globalToken = globalToken;
@@ -84,7 +90,7 @@ public sealed class WorkerManager<T>
 
         var processor = new WorkerProcessor<T>(endpoint, endpoint.Channel.Reader, handler, this);
         processor.Start();
-        
+
         // 异步触发事件，不阻塞当前调用
         _ = Task.Run(async () =>
         {
@@ -97,7 +103,7 @@ public sealed class WorkerManager<T>
                 _logger.LogError(ex, "Unexpected error while raising WorkerAdded event for Worker {WorkerId}", endpoint.Id);
             }
         });
-        
+
         _availableWorkers.Writer.TryWrite(endpoint);
         _logger.LogInformation("Worker {WorkerId} added", endpoint.Id);
         return endpoint;
@@ -185,6 +191,11 @@ public sealed class WorkerManager<T>
         endpoint.Cancellation.Cancel();
 
         await endpoint.WaitForCompletionAsync().ConfigureAwait(false);
+        if (endpoint.Fault is not null)
+        {
+            _logger.LogError(endpoint.Fault, "Worker {WorkerId} stopped with error", endpoint.Id);
+        }
+        endpoint.Cancellation.Dispose();
 
         await RaiseWorkerRemovedAsync(endpoint).ConfigureAwait(false);
         _logger.LogInformation("Worker {WorkerId} removed", endpoint.Id);
@@ -226,8 +237,10 @@ public sealed class WorkerManager<T>
     /// </summary>
     public async Task WaitForWorkerAvailableAsync(CancellationToken cancellationToken)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (await _availableWorkers.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 return;
@@ -235,6 +248,10 @@ public sealed class WorkerManager<T>
         }
     }
 
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="endpoint"></param>
     public void ReleaseWorker(WorkerEndpoint<T> endpoint)
     {
         if (endpoint.IsActive)
@@ -293,6 +310,11 @@ public sealed class WorkerManager<T>
         }
 
         await Task.WhenAll(snapshot.Select(ep => ep.WaitForCompletionAsync())).ConfigureAwait(false);
+
+        foreach (var endpoint in snapshot)
+        {
+            endpoint.Cancellation.Dispose();
+        }
     }
 
     /// <summary>
@@ -354,6 +376,18 @@ public sealed class WorkerManager<T>
             {
                 _logger.LogError(ex, "Exception occurred in WorkerRemoved event handler for Worker {WorkerId}", endpoint.Id);
             }
+        }
+    }
+
+    internal async ValueTask ReturnPayloadAsync(WorkerEndpoint<T> endpoint, T payload, CancellationToken cancellationToken)
+    {
+        if (endpoint.IsActive)
+        {
+            await endpoint.Writer.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            _logger.LogWarning("Discarded payload because worker {WorkerId} is inactive", endpoint.Id);
         }
     }
 }

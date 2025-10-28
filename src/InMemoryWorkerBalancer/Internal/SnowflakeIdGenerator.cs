@@ -14,7 +14,15 @@ internal static class SnowflakeIdGenerator
     /// </summary>
     public static long NextId()
     {
-        return Interlocked.Increment(ref _current);
+        while (true)
+        {
+            var current = Volatile.Read(ref _current);
+            var next = current == long.MaxValue ? 1 : current + 1;
+            if (Interlocked.CompareExchange(ref _current, next, current) == current)
+            {
+                return next;
+            }
+        }
     }
 }
 

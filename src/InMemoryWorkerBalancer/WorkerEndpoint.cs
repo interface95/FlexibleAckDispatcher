@@ -71,6 +71,8 @@ public sealed class WorkerEndpoint<T>
         _runningTask = runningTask;
     }
 
+    public Exception? Fault { get; private set; }
+
     /// <summary>
     /// 等待当前运行任务完成，忽略取消异常，用于优雅关闭。
     /// </summary>
@@ -87,6 +89,10 @@ public sealed class WorkerEndpoint<T>
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (Exception ex)
+        {
+            Fault = ex;
         }
     }
 }

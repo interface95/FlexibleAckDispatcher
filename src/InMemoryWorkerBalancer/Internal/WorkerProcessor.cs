@@ -86,6 +86,17 @@ internal sealed class WorkerProcessor<T>
                     "Worker {WorkerId} reached failure threshold {Threshold} and will stop.",
                     _endpoint.Id,
                     _endpoint.FailureThreshold);
+                if (!_endpoint.Cancellation.IsCancellationRequested)
+                {
+                    try
+                    {
+                        _endpoint.Cancellation.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Cancellation source already disposed during shutdown; ignore.
+                    }
+                }
             }
         }
     }
@@ -112,6 +123,17 @@ internal sealed class WorkerProcessor<T>
                         if (token is not null)
                         {
                             _workerManager.ForceRelease(token.DeliveryTag);
+                        }
+                        else if (!cancellationToken.IsCancellationRequested)
+                        {
+                            try
+                            {
+                                await _workerManager.ReturnPayloadAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (ChannelClosedException)
+                            {
+                                _workerManager.Logger.LogWarning("Worker {WorkerId} channel closed while returning payload", _endpoint.Id);
+                            }
                         }
                         _workerManager.Logger.LogError(ex, "Worker {WorkerId} handling failed", _endpoint.Id);
                     }

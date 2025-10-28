@@ -20,13 +20,32 @@ public sealed class WorkerDispatcher<T>
         {
             await foreach (var payload in sourceReader.ReadAllAsync(cancellationToken))
             {
-                WorkerEndpoint<T> endpoint;
-                while (!workerManager.TryRentAvailableWorker(out endpoint))
+                while (true)
                 {
-                    await workerManager.WaitForWorkerAvailableAsync(cancellationToken);
-                }
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                await endpoint.Writer.WriteAsync(payload, cancellationToken);
+                    if (!workerManager.TryRentAvailableWorker(out var endpoint))
+                    {
+                        await workerManager.WaitForWorkerAvailableAsync(cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    if (!endpoint.IsActive)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        await endpoint.Writer.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+                        break;
+                    }
+                    catch (ChannelClosedException)
+                    {
+                        // Worker was removed after renting; retry with another worker.
+                        continue;
+                    }
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

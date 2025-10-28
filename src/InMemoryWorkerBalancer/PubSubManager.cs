@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using InMemoryWorkerBalancer.Abstractions;
-using Microsoft.Extensions.Logging;
 using InMemoryWorkerBalancer.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer;
 
@@ -63,6 +63,13 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
         return await SubscribeAsync(handler, null, cancellationToken);
     }
 
+    /// <summary>
+    /// 注册一个新的订阅者
+    /// </summary>
+    /// <param name="handler"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentNullException"></exception>
     public ValueTask<IPubSubSubscription> SubscribeAsync(IWorkerMessageHandler<T> handler,
         CancellationToken cancellationToken = default)
     {
@@ -105,6 +112,14 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
         return subscription;
     }
 
+    /// <summary>
+    /// 注册一个新的订阅者
+    /// </summary>
+    /// <param name="handler"></param>
+    /// <param name="configure"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentNullException"></exception>
     public ValueTask<IPubSubSubscription> SubscribeAsync(
         IWorkerMessageHandler<T> handler,
         Action<SubscriptionOptions>? configure,
@@ -165,11 +180,20 @@ public sealed class PubSubManager<T> : IPubSubManager<T>
 
     private async Task RemoveSubscriptionAsync(int subscriptionId)
     {
-        if (_subscriptions.TryRemove(subscriptionId, out _))
+        if (!_subscriptions.TryRemove(subscriptionId, out _))
         {
-            await _workerManager.RemoveWorkerAsync(subscriptionId).ConfigureAwait(false);
-            _logger.LogInformation("Subscription {SubscriptionId} removed", subscriptionId);
+            return;
         }
+
+        var removed = await _workerManager.RemoveWorkerAsync(subscriptionId).ConfigureAwait(false);
+        if (!removed)
+        {
+            _subscriptions[subscriptionId] = new PubSubSubscription(this, subscriptionId);
+            _logger.LogWarning("Failed to remove worker for subscription {SubscriptionId}; subscription restored", subscriptionId);
+            return;
+        }
+
+        _logger.LogInformation("Subscription {SubscriptionId} removed", subscriptionId);
     }
 
     /// <summary>
