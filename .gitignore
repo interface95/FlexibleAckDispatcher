@@ -10,4 +10,4 @@ nupkg/
 # Rider/ReSharper 用户设置文件
 *.DotSettings.user
 .vs/
-.vscode/
+.vscode/.DS_Store

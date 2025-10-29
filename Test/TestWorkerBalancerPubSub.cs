@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using InMemoryWorkerBalancer;
 using InMemoryWorkerBalancer.Abstractions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace TestProject2;
@@ -603,6 +605,175 @@ public sealed class TestWorkerBalancerPubSub
                 break;
             }
         }
+    }
+
+    [TestMethod]
+    /// <summary>
+    /// 演示使用 Fluent Builder (Monad) 模式创建 PubSubManager。
+    /// </summary>
+    public async Task PubSubManagerMonad_FluentBuilderPattern_ShouldWork()
+    {
+        const int totalMessages = 20;
+        const int prefetch = 2;
+        
+        // ✨ 使用 Fluent Interface 链式调用创建 Manager（Rust 风格）
+        await using var manager = PubSubManagerMonad.Builder()
+            .AckMonitor(TimeSpan.FromMilliseconds(50))
+            .Prefetch(100)
+            .Concurrency(50)
+            .Create();
+
+        var processed = 0;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task Handler(WorkerMessage<int> message, CancellationToken cancellationToken)
+        {
+            var current = Interlocked.Increment(ref processed);
+            if (current == totalMessages)
+            {
+                completion.TrySetResult();
+            }
+
+            await message.AckAsync();
+        }
+
+        await manager.SubscribeAsync<int>(Handler, options => options.WithPrefetch(prefetch));
+
+        for (var i = 0; i < totalMessages; i++)
+        {
+            await manager.PublishAsync(i);
+        }
+
+        var finishedTask = await Task.WhenAny(completion.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        Assert.AreSame(completion.Task, finishedTask, "消息未在预期时间内全部处理");
+        Assert.AreEqual(totalMessages, processed);
+    }
+
+    [TestMethod]
+    /// <summary>
+    /// 验证当 handler 正在执行时 Dispose 订阅，会等待 handler 完成。
+    /// </summary>
+    public async Task Subscription_DisposeWhileHandlerRunning_ShouldWaitForCompletion()
+    {
+        await using var manager = PubSubManagerMonad.Builder()
+            .AckMonitor(TimeSpan.FromMilliseconds(50))
+            .Create();
+
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handlerCanComplete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handlerCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationRequested = false;
+
+        async Task Handler(WorkerMessage<int> message, CancellationToken cancellationToken)
+        {
+            handlerStarted.TrySetResult();
+            
+            try
+            {
+                // 等待允许完成的信号
+                await handlerCanComplete.Task;
+                
+                // 检查是否收到取消信号
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    cancellationRequested = true;
+                }
+                
+                await message.AckAsync();
+            }
+            finally
+            {
+                handlerCompleted.TrySetResult();
+            }
+        }
+
+        var subscription = await manager.SubscribeAsync<int>(Handler, options => options.WithPrefetch(1));
+        
+        // 发布一条消息
+        await manager.PublishAsync(42);
+        
+        // 等待 handler 开始执行
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        
+        // 在 handler 执行过程中 Dispose 订阅
+        var disposeTask = subscription.DisposeAsync().AsTask();
+        
+        // 稍等一下，确保 Dispose 已经调用
+        await Task.Delay(100);
+        
+        // Dispose 应该正在等待，还未完成
+        Assert.IsFalse(disposeTask.IsCompleted, "Dispose 应该等待 handler 完成");
+        Assert.IsFalse(handlerCompleted.Task.IsCompleted, "Handler 应该还在执行");
+        
+        // 允许 handler 完成
+        handlerCanComplete.TrySetResult();
+        
+        // 等待 handler 和 Dispose 完成
+        await Task.WhenAll(handlerCompleted.Task, disposeTask).WaitAsync(TimeSpan.FromSeconds(2));
+        
+        // 验证
+        Assert.IsTrue(handlerCompleted.Task.IsCompleted, "Handler 应该已完成");
+        Assert.IsTrue(disposeTask.IsCompleted, "Dispose 应该已完成");
+        Assert.IsTrue(cancellationRequested, "Handler 应该收到取消信号");
+        Assert.AreEqual(1, manager.CompletedCount, "消息应该被成功 ACK");
+    }
+
+    [TestMethod]
+    /// <summary>
+    /// 验证当 handler 被取消但未 ACK 时的行为。
+    /// </summary>
+    public async Task Subscription_DisposeCausesHandlerCancellation()
+    {
+        await using var manager = PubSubManagerMonad.Builder()
+            .AckMonitor(TimeSpan.FromMilliseconds(50))
+            .Create();
+
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationWasRequested = false;
+        var handlerFinished = false;
+
+        async Task Handler(WorkerMessage<int> message, CancellationToken cancellationToken)
+        {
+            handlerStarted.TrySetResult();
+            
+            try
+            {
+                // 等待很长时间，但应该被取消
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                cancellationWasRequested = true;
+                // 不 ACK，模拟处理失败的情况
+            }
+            finally
+            {
+                handlerFinished = true;
+            }
+        }
+
+        var subscription = await manager.SubscribeAsync<int>(Handler, options => options.WithPrefetch(1));
+        
+        // 发布一条消息
+        await manager.PublishAsync(42);
+        
+        // 等待 handler 开始执行
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        
+        var beforeCompleted = manager.CompletedCount;
+        var beforePending = manager.PendingCount;
+        
+        // Dispose 订阅
+        await subscription.DisposeAsync();
+        
+        // 验证
+        Assert.IsTrue(cancellationWasRequested, "Handler 应该收到取消信号");
+        Assert.IsTrue(handlerFinished, "Handler 应该已经结束");
+        Assert.AreEqual(0, manager.CompletedCount, "消息未被 ACK，完成数应该为 0");
+        
+        // 注意：这里不验证消息是否被重新投递，因为当前实现可能不支持
+        // 只验证 handler 确实被取消了
     }
 }
 
