@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using InMemoryWorkerBalancer.Abstractions;
+using InMemoryWorkerBalancer.Remote;
+using InMemoryWorkerBalancer.Remote.Clients.NamedPipe;
+using InMemoryWorkerBalancer.Remote.NamedPipe;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -23,6 +26,7 @@ public sealed class PubSubManagerOptions
     private TimeSpan? _defaultHandlerTimeout;
     private int? _defaultFailureThreshold;
     private TimeSpan? _defaultAckTimeout;
+    private IRemoteWorkerBridge? _remoteWorkerBridge;
 
     /// <summary>
     /// 配置自定义序列化器，默认使用 <see cref="JsonWorkerPayloadSerializer.Default"/>。
@@ -164,6 +168,25 @@ public sealed class PubSubManagerOptions
         return this;
     }
 
+    /// <summary>
+    /// 配置远程 Worker 桥接器，用于跨进程任务分发。
+    /// </summary>
+    public PubSubManagerOptions WithRemoteWorkerBridge(IRemoteWorkerBridge bridge)
+    {
+        _remoteWorkerBridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
+        return this;
+    }
+
+    /// <summary>
+    /// 配置远程 Worker 桥接器（命名管道实现）。
+    /// </summary>
+    public PubSubManagerOptions WithRemoteWorkerBridge(Action<NamedPipeRemoteWorkerOptions>? configure)
+    {
+        var options = new NamedPipeRemoteWorkerOptions();
+        configure?.Invoke(options);
+        return WithRemoteWorkerBridge(new NamedPipeRemoteWorkerBridge(options));
+    }
+
     internal IWorkerPayloadSerializer Serializer => _serializer;
 
     internal ILogger Logger => _logger;
@@ -184,6 +207,8 @@ public sealed class PubSubManagerOptions
         FailureThreshold = _defaultFailureThreshold,
         AckTimeout = _defaultAckTimeout
     };
+
+    internal IRemoteWorkerBridge? RemoteWorkerBridge => _remoteWorkerBridge;
 
     internal void Validate()
     {

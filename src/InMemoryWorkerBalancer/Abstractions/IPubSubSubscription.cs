@@ -5,6 +5,9 @@ namespace InMemoryWorkerBalancer.Abstractions;
 /// </summary>
 public interface IPubSubSubscription : IAsyncDisposable
 {
+    /// <summary>
+    /// 获取订阅的唯一标识。
+    /// </summary>
     int Id { get; }
 }
 

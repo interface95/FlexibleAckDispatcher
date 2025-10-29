@@ -105,13 +105,13 @@ internal sealed class WorkerManager
     /// <summary>
     /// 注册一个新的 Worker。
     /// </summary>
-    internal async ValueTask<WorkerEndpoint> AddWorkerAsync(WorkerProcessingDelegate handler, SubscriptionOptions options)
+    internal async ValueTask<WorkerEndpoint> AddWorkerAsync(WorkerProcessingDelegate handler, SubscriptionOptions options, IWorkerTaskRunnerFactory? taskRunnerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         var endpoint = CreateWorkerEndpoint(options);
 
-        var processor = new WorkerProcessor(endpoint, endpoint.Channel.Reader, handler, this);
+        var processor = new WorkerProcessor(endpoint, endpoint.Channel.Reader, handler, this, taskRunnerFactory);
         processor.Start();
 
         await RaiseWorkerAddedAsync(endpoint).ConfigureAwait(false);

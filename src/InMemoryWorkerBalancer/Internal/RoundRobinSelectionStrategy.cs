@@ -15,6 +15,9 @@ public sealed class RoundRobinSelectionStrategy : IWorkerSelectionStrategy
 
     private readonly record struct WorkerState(int CurrentConcurrency, int MaxConcurrency, bool IsActive);
 
+    /// <summary>
+    /// 获取当前可立即处理消息的 Worker 数量。
+    /// </summary>
     public int IdleCount
     {
         get
@@ -26,6 +29,9 @@ public sealed class RoundRobinSelectionStrategy : IWorkerSelectionStrategy
         }
     }
 
+    /// <summary>
+    /// 获取内部等待队列的近似长度（按可用 Worker 统计）。
+    /// </summary>
     public int QueueLength
     {
         get
@@ -164,6 +170,9 @@ public sealed class RoundRobinSelectionStrategy : IWorkerSelectionStrategy
         }
     }
 
+    /// <summary>
+    /// 释放内部持有的资源。
+    /// </summary>
     public void Dispose()
     {
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 0)

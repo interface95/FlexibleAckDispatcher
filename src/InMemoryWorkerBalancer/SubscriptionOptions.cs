@@ -43,7 +43,14 @@ public sealed class SubscriptionOptions
         }
     }
 
+    /// <summary>
+    /// 框架默认的 Prefetch 数量。
+    /// </summary>
     public const int DefaultPrefetch = 1;
+
+    /// <summary>
+    /// 框架支持的最大并发限制。
+    /// </summary>
     public const int MaxConcurrencyLimit = 50;
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
 
@@ -77,6 +84,9 @@ public sealed class SubscriptionOptions
     /// </summary>
     public TimeSpan? AckTimeout { get; private set; }
 
+    /// <summary>
+    /// 获取一个带有框架默认值的订阅选项实例。
+    /// </summary>
     public static SubscriptionOptions Defaults { get; } = new(default);
 
     /// <summary>

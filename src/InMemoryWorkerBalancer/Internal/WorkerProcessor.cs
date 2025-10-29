@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using InMemoryWorkerBalancer.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer.Internal;
@@ -16,17 +17,20 @@ internal sealed class WorkerProcessor
     private readonly ChannelReader<ReadOnlyMemory<byte>> _reader;
     private readonly WorkerProcessingDelegate _handler;
     private readonly WorkerManager _workerManager;
+    private readonly IWorkerTaskRunnerFactory _taskRunnerFactory;
 
     public WorkerProcessor(
         WorkerEndpoint endpoint,
         ChannelReader<ReadOnlyMemory<byte>> reader,
         WorkerProcessingDelegate handler,
-        WorkerManager workerManager)
+        WorkerManager workerManager,
+        IWorkerTaskRunnerFactory? taskRunnerFactory = null)
     {
         _endpoint = endpoint;
         _reader = reader;
         _handler = handler;
         _workerManager = workerManager;
+        _taskRunnerFactory = taskRunnerFactory ?? DefaultWorkerTaskRunnerFactory.Instance;
     }
 
     public void Start()
@@ -44,13 +48,13 @@ internal sealed class WorkerProcessor
     {
         var concurrency = _endpoint.Capacity.MaxConnections;
         var workers = new Task[concurrency];
-        var taskRunners = new WorkerTaskRunner[concurrency];
+        var taskRunners = new IWorkerTaskRunner[concurrency];
 
         _workerManager.Logger.LogInformation("Worker {WorkerId} starting with concurrency={Concurrency}", _endpoint.Id, concurrency);
 
         for (var i = 0; i < concurrency; i++)
         {
-            var taskRunner = new WorkerTaskRunner(_endpoint, _reader, _handler, _workerManager);
+            var taskRunner = _taskRunnerFactory.Create(_endpoint, _reader, _handler, _workerManager);
             taskRunners[i] = taskRunner;
             workers[i] = taskRunner.StartAsync(cancellationToken);
         }

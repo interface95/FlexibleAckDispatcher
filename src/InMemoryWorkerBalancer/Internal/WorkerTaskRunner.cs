@@ -1,11 +1,12 @@
 using System;
 using System.Threading;
 using System.Threading.Channels;
+using InMemoryWorkerBalancer.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer.Internal;
 
-internal sealed class WorkerTaskRunner
+internal sealed class WorkerTaskRunner : IWorkerTaskRunner
 {
     private readonly WorkerEndpoint _endpoint;
     private readonly ChannelReader<ReadOnlyMemory<byte>> _reader;

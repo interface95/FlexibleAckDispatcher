@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using InMemoryWorkerBalancer.Abstractions;
 using InMemoryWorkerBalancer.Internal;
+using InMemoryWorkerBalancer.Remote;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer;
@@ -22,6 +23,8 @@ public sealed class PubSubManager : IPubSubManager
     private readonly IWorkerPayloadSerializer _serializer;
     private readonly Task _dispatchTask;
     private readonly SubscriptionDefaults _subscriptionDefaults;
+    private readonly IRemoteWorkerBridge? _remoteBridge;
+    private readonly RemoteWorkerCoordinator? _remoteCoordinator;
     private int _disposed;
 
     /// <summary>
@@ -62,6 +65,14 @@ public sealed class PubSubManager : IPubSubManager
         _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger, options.AckMonitorInterval, selectionStrategy);
         AttachWorkerLifecycleHandlers(options);
         _subscriptionDefaults = options.BuildSubscriptionDefaults();
+        _remoteBridge = options.RemoteWorkerBridge;
+
+        if (_remoteBridge is not null)
+        {
+            _logger.LogInformation("Remote worker bridge configured: {BridgeType}", _remoteBridge.GetType().Name);
+            _remoteBridge.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            _remoteCoordinator = new RemoteWorkerCoordinator(_workerManager, _remoteBridge, _logger, _subscriptionDefaults);
+        }
         _dispatchTask = Task.Factory.StartNew(
                 () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
                 CancellationToken.None,
@@ -201,6 +212,16 @@ public sealed class PubSubManager : IPubSubManager
 
         await _cancellation.CancelAsync().ConfigureAwait(false);
         _channel.Writer.TryComplete();
+
+        if (_remoteCoordinator is not null)
+        {
+            await _remoteCoordinator.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (_remoteBridge is not null)
+        {
+            await _remoteBridge.DisposeAsync().ConfigureAwait(false);
+        }
 
         foreach (var subscription in _subscriptions.Values)
         {
