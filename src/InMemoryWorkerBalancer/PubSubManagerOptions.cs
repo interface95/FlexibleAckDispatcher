@@ -16,6 +16,7 @@ public sealed class PubSubManagerOptions
     private readonly List<Func<WorkerEndpointSnapshot, Task>> _workerRemovedHandlers = new();
     private IWorkerPayloadSerializer _serializer = JsonWorkerPayloadSerializer.Default;
     private ILogger _logger = NullLogger.Instance;
+    private Func<IWorkerSelectionStrategy> _selectionStrategyFactory = () => new Internal.PriorityQueueWorkerSelectionStrategy();
     private TimeSpan? _ackMonitorInterval;
     private int? _defaultPrefetch;
     private int? _defaultConcurrencyLimit;
@@ -38,6 +39,15 @@ public sealed class PubSubManagerOptions
     public PubSubManagerOptions WithLogger(ILogger logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        return this;
+    }
+
+    /// <summary>
+    /// 配置 Worker 选择策略工厂，默认使用 <see cref="Internal.PriorityQueueWorkerSelectionStrategy"/>。
+    /// </summary>
+    public PubSubManagerOptions WithSelectionStrategy(Func<IWorkerSelectionStrategy> strategyFactory)
+    {
+        _selectionStrategyFactory = strategyFactory ?? throw new ArgumentNullException(nameof(strategyFactory));
         return this;
     }
 
@@ -158,6 +168,8 @@ public sealed class PubSubManagerOptions
 
     internal ILogger Logger => _logger;
 
+    internal Func<IWorkerSelectionStrategy> SelectionStrategyFactory => _selectionStrategyFactory;
+
     internal IReadOnlyList<Func<WorkerEndpointSnapshot, Task>> WorkerAddedHandlers => _workerAddedHandlers;
 
     internal IReadOnlyList<Func<WorkerEndpointSnapshot, Task>> WorkerRemovedHandlers => _workerRemovedHandlers;
@@ -175,6 +187,7 @@ public sealed class PubSubManagerOptions
 
     internal void Validate()
     {
+        // 1. 验证必需的依赖项
         if (_serializer is null)
         {
             throw new InvalidOperationException("Serializer must be provided.");
@@ -183,6 +196,154 @@ public sealed class PubSubManagerOptions
         if (_logger is null)
         {
             throw new InvalidOperationException("Logger must be provided.");
+        }
+
+        if (_selectionStrategyFactory is null)
+        {
+            throw new InvalidOperationException("Selection strategy factory must be provided.");
+        }
+
+        // 2. 验证 AckMonitorInterval 的合理性
+        if (_ackMonitorInterval.HasValue)
+        {
+            if (_ackMonitorInterval.Value <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"AckMonitorInterval ({_ackMonitorInterval.Value}) must be greater than zero.");
+            }
+
+            if (_ackMonitorInterval.Value < TimeSpan.FromMilliseconds(10))
+            {
+                throw new InvalidOperationException(
+                    $"AckMonitorInterval ({_ackMonitorInterval.Value}) is too small (min: 10ms). This may cause excessive CPU usage.");
+            }
+
+            if (_ackMonitorInterval.Value > TimeSpan.FromHours(1))
+            {
+                throw new InvalidOperationException(
+                    $"AckMonitorInterval ({_ackMonitorInterval.Value}) is too large (max: 1 hour). Messages may not be released timely.");
+            }
+        }
+
+        // 3. 验证默认 Prefetch 范围
+        if (_defaultPrefetch.HasValue)
+        {
+            if (_defaultPrefetch.Value <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Default Prefetch ({_defaultPrefetch.Value}) must be greater than zero.");
+            }
+
+            if (_defaultPrefetch.Value > 10000)
+            {
+                throw new InvalidOperationException(
+                    $"Default Prefetch ({_defaultPrefetch.Value}) is too large (max: 10000). This may cause memory issues.");
+            }
+        }
+
+        // 4. 验证默认 ConcurrencyLimit 范围
+        if (_defaultConcurrencyLimit.HasValue)
+        {
+            if (_defaultConcurrencyLimit.Value <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Default ConcurrencyLimit ({_defaultConcurrencyLimit.Value}) must be greater than zero.");
+            }
+
+            if (_defaultConcurrencyLimit.Value > SubscriptionOptions.MaxConcurrencyLimit)
+            {
+                throw new InvalidOperationException(
+                    $"Default ConcurrencyLimit ({_defaultConcurrencyLimit.Value}) cannot exceed {SubscriptionOptions.MaxConcurrencyLimit}.");
+            }
+
+            // 如果同时设置了 Prefetch，验证关系
+            if (_defaultPrefetch.HasValue && _defaultConcurrencyLimit.Value > _defaultPrefetch.Value)
+            {
+                throw new InvalidOperationException(
+                    $"Default ConcurrencyLimit ({_defaultConcurrencyLimit.Value}) cannot exceed Default Prefetch ({_defaultPrefetch.Value}).");
+            }
+        }
+
+        // 5. 验证默认 HandlerTimeout 范围
+        if (_defaultHandlerTimeout.HasValue)
+        {
+            if (_defaultHandlerTimeout.Value <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"Default HandlerTimeout ({_defaultHandlerTimeout.Value}) must be greater than zero.");
+            }
+
+            if (_defaultHandlerTimeout.Value > TimeSpan.FromHours(24))
+            {
+                throw new InvalidOperationException(
+                    $"Default HandlerTimeout ({_defaultHandlerTimeout.Value}) is too large (max: 24 hours).");
+            }
+        }
+
+        // 6. 验证默认 FailureThreshold 范围
+        if (_defaultFailureThreshold.HasValue)
+        {
+            if (_defaultFailureThreshold.Value <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Default FailureThreshold ({_defaultFailureThreshold.Value}) must be greater than zero.");
+            }
+
+            if (_defaultFailureThreshold.Value > 100)
+            {
+                throw new InvalidOperationException(
+                    $"Default FailureThreshold ({_defaultFailureThreshold.Value}) is too large (max: 100).");
+            }
+        }
+
+        // 7. 验证默认 AckTimeout 范围及其与 HandlerTimeout 的关系
+        if (_defaultAckTimeout.HasValue)
+        {
+            if (_defaultAckTimeout.Value <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"Default AckTimeout ({_defaultAckTimeout.Value}) must be greater than zero.");
+            }
+
+            if (_defaultAckTimeout.Value > TimeSpan.FromHours(48))
+            {
+                throw new InvalidOperationException(
+                    $"Default AckTimeout ({_defaultAckTimeout.Value}) is too large (max: 48 hours).");
+            }
+
+            // 如果同时设置了 HandlerTimeout，验证关系
+            if (_defaultHandlerTimeout.HasValue)
+            {
+                if (_defaultAckTimeout.Value <= _defaultHandlerTimeout.Value)
+                {
+                    throw new InvalidOperationException(
+                        $"Default AckTimeout ({_defaultAckTimeout.Value}) must be greater than Default HandlerTimeout ({_defaultHandlerTimeout.Value}).");
+                }
+
+                var minimumBuffer = TimeSpan.FromSeconds(1);
+                if (_defaultAckTimeout.Value - _defaultHandlerTimeout.Value < minimumBuffer)
+                {
+                    throw new InvalidOperationException(
+                        $"Default AckTimeout ({_defaultAckTimeout.Value}) should be at least {minimumBuffer} longer than Default HandlerTimeout ({_defaultHandlerTimeout.Value}).");
+                }
+            }
+        }
+
+        // 8. 验证事件处理器列表不包含 null
+        for (var i = 0; i < _workerAddedHandlers.Count; i++)
+        {
+            if (_workerAddedHandlers[i] is null)
+            {
+                throw new InvalidOperationException($"Worker added handler at index {i} cannot be null.");
+            }
+        }
+
+        for (var i = 0; i < _workerRemovedHandlers.Count; i++)
+        {
+            if (_workerRemovedHandlers[i] is null)
+            {
+                throw new InvalidOperationException($"Worker removed handler at index {i} cannot be null.");
+            }
         }
     }
 }

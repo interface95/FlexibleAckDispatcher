@@ -13,6 +13,7 @@
 - 🛠️ **可配默认策略**：通过 `PubSubManagerOptions` 统一下发默认的 Prefetch、并发限制、处理超时与 ACK 超时
 - 🔒 **更安全的载荷控制**：内置最大载荷尺寸限制（默认 10 MiB），避免异常数据冲击内存
 - 🔌 **动态热插拔**：支持运行时动态添加和移除订阅者
+- 🧠 **可插拔调度策略**：通过 `IWorkerSelectionStrategy` 自定义 Worker 选择逻辑
 - 🛡️ **失败保护**：连续失败阈值，达到限制后自动停止 Worker，防止级联故障
 
 ## 📦 安装
@@ -123,6 +124,7 @@ await using var manager = PubSubManager.Create(options => options
     .WithDefaultHandlerTimeout(TimeSpan.FromSeconds(45))   // 默认处理超时
     .WithDefaultFailureThreshold(5)                        // 默认失败阈值
     .WithDefaultAckTimeout(TimeSpan.FromMinutes(5))        // 默认 ACK 超时
+    .WithSelectionStrategy(() => new PriorityQueueWorkerSelectionStrategy()) // 自定义调度策略
     .WithAckMonitorInterval(TimeSpan.FromMilliseconds(200))// 调整 ACK 超时轮询频率
     .OnWorkerAddedHandler(async snapshot =>                // Worker 添加事件
     {
@@ -467,6 +469,71 @@ await manager.SubscribeAsync<int>(async (message, cancellationToken) =>
     await message.AckAsync();
 });
 ```
+
+### 9. 自定义 Worker 调度策略
+
+`PubSubManagerOptions.WithSelectionStrategy` 支持接入自定义的 Worker 选择策略。默认实现 `PriorityQueueWorkerSelectionStrategy` 复用最少活跃连接模型，你也可以根据业务需求实现 `IWorkerSelectionStrategy`：
+
+```csharp
+public sealed class RoundRobinWorkerSelectionStrategy : IWorkerSelectionStrategy
+{
+    private readonly object _sync = new();
+    private readonly Queue<int> _queue = new();
+    private readonly Dictionary<int, WorkerEndpointSnapshot> _snapshots = new();
+
+    public int IdleCount => _queue.Count;
+    public int QueueLength => _queue.Count;
+
+    public void Update(WorkerEndpointSnapshot snapshot)
+    {
+        lock (_sync)
+        {
+            _snapshots[snapshot.Id] = snapshot;
+            if (snapshot.IsActive && snapshot.CurrentConcurrency < snapshot.MaxConcurrency && !_queue.Contains(snapshot.Id))
+            {
+                _queue.Enqueue(snapshot.Id);
+            }
+        }
+    }
+
+    public bool TryRent(out int workerId)
+    {
+        lock (_sync)
+        {
+            while (_queue.Count > 0)
+            {
+                workerId = _queue.Dequeue();
+                var snapshot = _snapshots[workerId];
+                if (snapshot.IsActive && snapshot.CurrentConcurrency < snapshot.MaxConcurrency)
+                {
+                    return true;
+                }
+            }
+        }
+
+        workerId = default;
+        return false;
+    }
+
+    public Task WaitForWorkerAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public void Remove(int workerId)
+    {
+        lock (_sync)
+        {
+            _snapshots.Remove(workerId);
+        }
+    }
+
+    public void Dispose() { }
+}
+
+// 通过选项注册
+await using var manager = PubSubManager.Create(opts =>
+    opts.WithSelectionStrategy(() => new RoundRobinWorkerSelectionStrategy()));
+```
+
+实现时只需关注 Worker 的加入、租用、归还、移除四个生命周期，即可快速完成自定义策略。
 
 ## 🧪 测试
 

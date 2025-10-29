@@ -1,3 +1,4 @@
+using InMemoryWorkerBalancer.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer.Internal;
@@ -12,13 +13,15 @@ internal static class WorkerManagerFactory
     /// </summary>
     internal static WorkerManager CreateManager(
         CancellationToken globalToken,
-        ILogger? logger = null,
-        TimeSpan? ackMonitorInterval = null)
+        ILogger logger,
+        TimeSpan? ackMonitorInterval,
+        IWorkerSelectionStrategy selectionStrategy)
     {
         return new WorkerManager(
             globalToken,
-            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
-            ackMonitorInterval);
+            logger,
+            ackMonitorInterval,
+            selectionStrategy);
     }
 }
 

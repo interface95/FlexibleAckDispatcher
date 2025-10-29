@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using InMemoryWorkerBalancer.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace InMemoryWorkerBalancer.Internal;
@@ -23,8 +24,7 @@ internal sealed class WorkerManager
     private readonly Dictionary<int, WorkerEndpoint> _workerMap = new();
     private readonly ConcurrentDictionary<long, WorkerAckToken> _inFlight = new();
     private readonly ConcurrentDictionary<long, AckTimeoutEntry> _ackTimeouts = new();
-    private readonly PriorityQueue<WorkerEndpoint, int> _availableWorkers = new();
-    private readonly SemaphoreSlim _availableWorkerSignal = new(0);
+    private readonly IWorkerSelectionStrategy _selectionStrategy;
     private readonly CancellationToken _globalToken;
     private readonly ILogger _logger;
     private readonly TimeSpan? _configuredAckMonitorInterval;
@@ -33,7 +33,6 @@ internal sealed class WorkerManager
     private TimeSpan? _effectiveAckMonitorInterval;
     private int _ackMonitorStopped;
     private int _workerIdSeed;
-    private int _availableWorkerCount;
     private int _disposed;
     private long _dispatchedCount;
     private long _completedCount;
@@ -56,7 +55,7 @@ internal sealed class WorkerManager
     /// <summary>
     /// 当前空闲 Worker 数量。
     /// </summary>
-    internal int IdleCount => Math.Max(Volatile.Read(ref _availableWorkerCount), 0);
+    internal int IdleCount => _selectionStrategy.IdleCount;
 
     /// <summary>
     /// 当前执行中的任务数量（全局 In-Flight）。
@@ -66,16 +65,7 @@ internal sealed class WorkerManager
     /// <summary>
     /// 调度队列中的 Worker 数量。
     /// </summary>
-    internal int WorkerQueueCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _availableWorkers.Count;
-            }
-        }
-    }
+    internal int WorkerQueueCount => _selectionStrategy.QueueLength;
 
     internal long DispatchedCount => Interlocked.Read(ref _dispatchedCount);
 
@@ -83,11 +73,16 @@ internal sealed class WorkerManager
 
     internal long PendingCount => Math.Max(Interlocked.Read(ref _pendingCount), 0);
 
-    internal WorkerManager(CancellationToken globalToken, ILogger logger, TimeSpan? ackMonitorInterval)
+    internal WorkerManager(
+        CancellationToken globalToken, 
+        ILogger logger, 
+        TimeSpan? ackMonitorInterval,
+        IWorkerSelectionStrategy selectionStrategy)
     {
         _globalToken = globalToken;
         _logger = logger;
         _configuredAckMonitorInterval = ackMonitorInterval;
+        _selectionStrategy = selectionStrategy ?? throw new ArgumentNullException(nameof(selectionStrategy));
     }
 
     /// <summary>
@@ -121,7 +116,8 @@ internal sealed class WorkerManager
 
         await RaiseWorkerAddedAsync(endpoint).ConfigureAwait(false);
 
-        EnqueueAvailableWorker(endpoint);
+        // 通知策略有新 Worker 可用
+        _selectionStrategy.Update(endpoint.CreateSnapshot());
         _logger.LogDebug("Worker {WorkerId} added", endpoint.Id);
         return endpoint;
     }
@@ -173,7 +169,8 @@ internal sealed class WorkerManager
         _logger.LogDebug("Worker {WorkerId} acquired slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
         Interlocked.Increment(ref _dispatchedCount);
 
-        TryReturnIfCapacityAvailable(endpoint);
+        // 更新策略中 Worker 的状态
+        _selectionStrategy.Update(endpoint.CreateSnapshot());
         return token;
     }
 
@@ -247,6 +244,9 @@ internal sealed class WorkerManager
             endpoint.IsActive = false;
         }
 
+        // 从策略中移除 Worker
+        _selectionStrategy.Remove(workerId);
+
         endpoint.Channel.Writer.TryComplete();
         await endpoint.Cancellation.CancelAsync().ConfigureAwait(false);
 
@@ -271,39 +271,31 @@ internal sealed class WorkerManager
     {
         endpoint = null!;
 
-        if (!_availableWorkerSignal.Wait(0))
+        if (!_selectionStrategy.TryRent(out var workerId))
         {
             return false;
         }
 
         lock (_lock)
         {
-            while (_availableWorkers.TryDequeue(out var candidate, out _))
+            if (!_workerMap.TryGetValue(workerId, out var worker))
             {
-                Interlocked.Decrement(ref _availableWorkerCount);
-
-                if (!_workerMap.TryGetValue(candidate.Id, out var current) || !ReferenceEquals(current, candidate))
-                {
-                    continue;
-                }
-
-                if (!current.IsActive)
-                {
-                    continue;
-                }
-
-                if (current.Capacity.CurrentConnections >= current.Capacity.MaxConnections)
-                {
-                    continue;
-                }
-
-                endpoint = current;
-                return true;
+                return false;
             }
-        }
 
-        _availableWorkerSignal.Release();
-        return false;
+            if (!worker.IsActive)
+            {
+                return false;
+            }
+
+            if (worker.Capacity.CurrentConnections >= worker.Capacity.MaxConnections)
+            {
+                return false;
+            }
+
+            endpoint = worker;
+            return true;
+        }
     }
 
     /// <summary>
@@ -311,12 +303,11 @@ internal sealed class WorkerManager
     /// </summary>
     internal async Task WaitForWorkerAvailableAsync(CancellationToken cancellationToken)
     {
-        await _availableWorkerSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
-        _availableWorkerSignal.Release();
+        await _selectionStrategy.WaitForWorkerAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// 
+    /// 释放 Worker，通知策略 Worker 状态已更新。
     /// </summary>
     /// <param name="endpoint"></param>
     private void ReleaseWorker(WorkerEndpoint endpoint)
@@ -324,42 +315,8 @@ internal sealed class WorkerManager
         if (!endpoint.IsActive) 
             return;
         
-        EnqueueAvailableWorker(endpoint);
+        _selectionStrategy.Update(endpoint.CreateSnapshot());
         _logger.LogTrace("Worker {WorkerId} returned to available pool", endpoint.Id);
-    }
-
-    private void TryReturnIfCapacityAvailable(WorkerEndpoint endpoint)
-    {
-        if (!endpoint.IsActive)
-            return;
-
-        if (endpoint.Capacity.CurrentConnections >= endpoint.Capacity.MaxConnections)
-            return;
-        
-        EnqueueAvailableWorker(endpoint);
-        _logger.LogTrace("Worker {WorkerId} still has capacity, re-queued for dispatch", endpoint.Id);
-    }
-
-    private void EnqueueAvailableWorker(WorkerEndpoint endpoint)
-    {
-        if (!endpoint.IsActive)
-        {
-            return;
-        }
-
-        var current = endpoint.Capacity.CurrentConnections;
-        if (current >= endpoint.Capacity.MaxConnections)
-        {
-            return;
-        }
-
-        lock (_lock)
-        {
-            _availableWorkers.Enqueue(endpoint, current);
-        }
-
-        Interlocked.Increment(ref _availableWorkerCount);
-        _availableWorkerSignal.Release();
     }
 
     internal void RegisterAckTimeout(WorkerEndpoint endpoint, WorkerAckToken token)
@@ -534,7 +491,7 @@ internal sealed class WorkerManager
             endpoint.Capacity.Dispose();
         }
 
-        Interlocked.Exchange(ref _availableWorkerCount, 0);
+        _selectionStrategy.Dispose();
         await ShutdownAckTimeoutMonitorAsync().ConfigureAwait(false);
     }
 

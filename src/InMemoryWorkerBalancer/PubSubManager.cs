@@ -58,7 +58,8 @@ public sealed class PubSubManager : IPubSubManager
             SingleWriter = false
         });
 
-        _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger, options.AckMonitorInterval);
+        var selectionStrategy = options.SelectionStrategyFactory.Invoke();
+        _workerManager = WorkerManagerFactory.CreateManager(_cancellation.Token, _logger, options.AckMonitorInterval, selectionStrategy);
         AttachWorkerLifecycleHandlers(options);
         _subscriptionDefaults = options.BuildSubscriptionDefaults();
         _dispatchTask = Task.Factory.StartNew(

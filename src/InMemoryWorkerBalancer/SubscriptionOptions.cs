@@ -51,22 +51,27 @@ public sealed class SubscriptionOptions
     /// 每个订阅默认的 Prefetch 数量。
     /// </summary>
     public int Prefetch { get; private set; } = DefaultPrefetch;
+
     /// <summary>
     /// 订阅别名，方便日志排查。
     /// </summary>
     public string? Name { get; private set; }
+
     /// <summary>
     /// Worker 内部允许的最大并发数。
     /// </summary>
     public int ConcurrencyLimit { get; private set; } = DefaultPrefetch;
+
     /// <summary>
     /// Handler 执行的超时时间。
     /// </summary>
     public TimeSpan HandlerTimeout { get; private set; } = DefaultTimeout;
+
     /// <summary>
     /// 连续失败或超时的阈值。
     /// </summary>
     public int FailureThreshold { get; private set; } = 3;
+    
     /// <summary>
     /// ACK 超时时间，超过该时间未确认的消息将被自动释放。
     /// </summary>
@@ -192,6 +197,98 @@ public sealed class SubscriptionOptions
     public static SubscriptionOptions Create() => new(default);
 
     internal static SubscriptionOptions Create(SubscriptionDefaults defaults) => new(defaults);
+
+    internal void Validate()
+    {
+        // 1. 验证 Prefetch 范围
+        if (Prefetch <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Prefetch ({Prefetch}) must be greater than zero.");
+        }
+
+        if (Prefetch > 10000)
+        {
+            throw new InvalidOperationException(
+                $"Prefetch ({Prefetch}) is too large (max: 10000). Large prefetch values may cause memory issues.");
+        }
+
+        // 2. 验证 ConcurrencyLimit 与 Prefetch 的关系
+        if (ConcurrencyLimit > Prefetch)
+        {
+            throw new InvalidOperationException(
+                $"ConcurrencyLimit ({ConcurrencyLimit}) cannot exceed Prefetch ({Prefetch})");
+        }
+
+        if (ConcurrencyLimit <= 0)
+        {
+            throw new InvalidOperationException(
+                $"ConcurrencyLimit ({ConcurrencyLimit}) must be greater than zero.");
+        }
+
+        // 3. 验证 HandlerTimeout
+        if (HandlerTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException(
+                $"HandlerTimeout ({HandlerTimeout}) must be greater than zero.");
+        }
+
+        if (HandlerTimeout > TimeSpan.FromHours(24))
+        {
+            throw new InvalidOperationException(
+                $"HandlerTimeout ({HandlerTimeout}) is too large (max: 24 hours). Consider using a shorter timeout.");
+        }
+
+        // 4. 验证 AckTimeout 与 HandlerTimeout 的关系
+        if (AckTimeout.HasValue)
+        {
+            if (AckTimeout.Value <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"AckTimeout ({AckTimeout.Value}) must be greater than zero.");
+            }
+
+            if (AckTimeout.Value > TimeSpan.FromHours(48))
+            {
+                throw new InvalidOperationException(
+                    $"AckTimeout ({AckTimeout.Value}) is too large (max: 48 hours).");
+            }
+
+            if (HandlerTimeout >= AckTimeout.Value)
+            {
+                throw new InvalidOperationException(
+                    $"HandlerTimeout ({HandlerTimeout}) must be less than AckTimeout ({AckTimeout.Value})");
+            }
+
+            // AckTimeout 应该给 HandlerTimeout 留出足够的缓冲时间
+            var minimumBuffer = TimeSpan.FromSeconds(1);
+            if (AckTimeout.Value - HandlerTimeout < minimumBuffer)
+            {
+                throw new InvalidOperationException(
+                    $"AckTimeout ({AckTimeout.Value}) should be at least {minimumBuffer} longer than HandlerTimeout ({HandlerTimeout}) to allow proper cleanup.");
+            }
+        }
+
+        // 5. 验证 FailureThreshold
+        if (FailureThreshold <= 0)
+        {
+            throw new InvalidOperationException(
+                $"FailureThreshold ({FailureThreshold}) must be greater than zero.");
+        }
+
+        if (FailureThreshold > 100)
+        {
+            throw new InvalidOperationException(
+                $"FailureThreshold ({FailureThreshold}) is too large (max: 100). Consider using a lower threshold.");
+        }
+
+        // 6. 验证 Name（如果设置）
+        if (Name != null && string.IsNullOrWhiteSpace(Name))
+        {
+            throw new InvalidOperationException(
+                "Name cannot be empty or whitespace. Use null if you don't want to set a name.");
+        }
+    }
 
     private void EnsureConcurrencyInvariant()
     {
