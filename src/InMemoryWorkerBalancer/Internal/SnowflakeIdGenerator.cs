@@ -24,13 +24,12 @@ internal static class SnowflakeIdGenerator
         // 溢出：将计数器重置为 1，避免返回非正数。
         lock (typeof(SnowflakeIdGenerator))
         {
-            if (_current <= 0)
-            {
-                _current = 1;
-                return 1;
-            }
+            if (_current > 0) 
+                return _current;
+            
+            _current = 1;
+            return 1;
 
-            return _current;
         }
     }
 }

@@ -80,9 +80,8 @@ public sealed class TestNamedPipeRemoteBridge
 
         await client.AckAsync(options =>
         {
-            options
-                .WithWorkerId(workerId)
-                .WithDeliveryTag(message.Task.DeliveryTag);
+            options.WithWorkerId(workerId)
+                    .WithDeliveryTag(message.Task.DeliveryTag);
         }).WaitAsync(TestTimeout);
 
         var acknowledgement = await ackTcs.Task.WaitAsync(TestTimeout);

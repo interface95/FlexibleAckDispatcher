@@ -73,25 +73,13 @@ public sealed class PubSubManager : IPubSubManager
             _remoteBridge.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
             _remoteCoordinator = new RemoteWorkerCoordinator(_workerManager, _remoteBridge, _logger, _subscriptionDefaults);
         }
+        
         _dispatchTask = Task.Factory.StartNew(
                 () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
                 CancellationToken.None,
                 TaskCreationOptions.LongRunning,
                 TaskScheduler.Default)
             .Unwrap();
-    }
-
-    private void AttachWorkerLifecycleHandlers(PubSubManagerOptions options)
-    {
-        foreach (var handler in options.WorkerAddedHandlers)
-        {
-            _workerManager.WorkerAdded += handler;
-        }
-
-        foreach (var handler in options.WorkerRemovedHandlers)
-        {
-            _workerManager.WorkerRemoved += handler;
-        }
     }
 
     /// <summary>
@@ -261,6 +249,19 @@ public sealed class PubSubManager : IPubSubManager
             var typedMessage = new WorkerMessage<T>(context, payload);
             await handler(typedMessage, cancellationToken).ConfigureAwait(false);
         };
+    }
+    
+    private void AttachWorkerLifecycleHandlers(PubSubManagerOptions options)
+    {
+        foreach (var handler in options.WorkerAddedHandlers)
+        {
+            _workerManager.WorkerAdded += handler;
+        }
+
+        foreach (var handler in options.WorkerRemovedHandlers)
+        {
+            _workerManager.WorkerRemoved += handler;
+        }
     }
 
     private IPubSubChannel<T> Channel<T>()

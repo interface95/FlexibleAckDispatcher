@@ -55,18 +55,18 @@ public sealed class RoundRobinSelectionStrategy : IWorkerSelectionStrategy
 
             // 检查是否有任何Worker可用
             var hasAvailable = _workerMap.Values.Any(w => w.IsActive && w.CurrentConcurrency < w.MaxConcurrency);
+
+            if (!hasAvailable) 
+                return;
             
-            if (hasAvailable)
+            // 确保信号量有计数（可能已经有了，没关系）
+            try
             {
-                // 确保信号量有计数（可能已经有了，没关系）
-                try
-                {
-                    _availableWorkerSignal.Release();
-                }
-                catch (SemaphoreFullException)
-                {
-                    // 信号量已经有计数了，忽略
-                }
+                _availableWorkerSignal.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // 信号量已经有计数了，忽略
             }
         }
     }
@@ -80,10 +80,8 @@ public sealed class RoundRobinSelectionStrategy : IWorkerSelectionStrategy
 
         // 非阻塞检查信号量
         if (!_availableWorkerSignal.Wait(0))
-        {
             return false;
-        }
-
+        
         lock (_lock)
         {
             if (_workerMap.Count == 0)
