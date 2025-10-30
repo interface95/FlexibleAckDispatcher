@@ -1,6 +1,6 @@
 using System;
 
-namespace FlexibleAckDispatcher;
+namespace FlexibleAckDispatcher.Abstractions;
 
 /// <summary>
 /// Worker 端点的只读快照信息。

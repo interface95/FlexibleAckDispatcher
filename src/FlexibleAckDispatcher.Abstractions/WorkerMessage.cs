@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
-namespace FlexibleAckDispatcher;
+namespace FlexibleAckDispatcher.Abstractions;
 
 /// <summary>
 /// 传递给订阅者的消息包装器，携带手动确认所需的信息。

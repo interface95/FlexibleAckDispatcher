@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Grpc.Core;
 using GrpcDotNetNamedPipes;
 using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe.Options;
-using InMemoryWorkerBalancer.Remote.Protos;
+using FlexibleAckDispatcher.GrpcServer.Protos;
 
 namespace FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
 

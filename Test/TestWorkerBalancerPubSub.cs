@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using FlexibleAckDispatcher;
+using FlexibleAckDispatcher.Abstractions;
 using FlexibleAckDispatcher.Abstractions;
 using FlexibleAckDispatcher.InMemory;
 

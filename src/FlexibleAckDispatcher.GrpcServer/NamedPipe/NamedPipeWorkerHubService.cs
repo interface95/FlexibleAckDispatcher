@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
+using FlexibleAckDispatcher.GrpcServer.Protos;
 using Grpc.Core;
-using InMemoryWorkerBalancer.Remote.Protos;
 
 namespace FlexibleAckDispatcher.GrpcServer.NamedPipe;
 

@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FlexibleAckDispatcher;
+namespace FlexibleAckDispatcher.Abstractions;
 
 /// <summary>
 /// Worker 所需的处理委托，返回后表示处理完成。

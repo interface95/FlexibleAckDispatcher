@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using FlexibleAckDispatcher.Abstractions.Remote;
-using InMemoryWorkerBalancer.Remote.Protos;
+using FlexibleAckDispatcher.GrpcServer.Protos;
 
 namespace FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe.Options;
 

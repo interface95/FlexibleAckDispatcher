@@ -1,5 +1,5 @@
 using System;
-using InMemoryWorkerBalancer.Remote.Protos;
+using FlexibleAckDispatcher.GrpcServer.Protos;
 
 namespace FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe.Options;
 

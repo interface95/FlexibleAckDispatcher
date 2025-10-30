@@ -3,8 +3,9 @@ using System.Collections.Concurrent;
 using Google.Protobuf;
 using Grpc.Core;
 using GrpcDotNetNamedPipes;
+using FlexibleAckDispatcher.Abstractions;
 using FlexibleAckDispatcher.Abstractions.Remote;
-using InMemoryWorkerBalancer.Remote.Protos;
+using FlexibleAckDispatcher.GrpcServer.Protos;
 
 namespace FlexibleAckDispatcher.GrpcServer.NamedPipe;
 
