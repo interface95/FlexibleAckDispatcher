@@ -12,7 +12,7 @@ internal sealed class NoopWorkerTaskRunner : IWorkerTaskRunner
     {
     }
 
-    public bool IsStopped => true;
+    public bool IsStopped => false;
 
     public int FailureCount => 0;
 
