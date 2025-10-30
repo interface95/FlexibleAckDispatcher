@@ -322,7 +322,8 @@ public sealed class TestWorkerSelectionStrategies
         var processedCounts = new ConcurrentDictionary<int, int>();
         var processed = 0;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var cts = new CancellationTokenSource(GrpcTestTimeout);
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(GrpcTestTimeout);
 
         var clients = new List<NamedPipeRemoteWorkerClient>();
         var subscriptions = new List<AsyncServerStreamingCall<DispatcherMessage>>();
@@ -388,9 +389,11 @@ public sealed class TestWorkerSelectionStrategies
             await manager.PublishAsync(i).ConfigureAwait(false);
         }
 
-        await completion.Task.WaitAsync(GrpcTestTimeout).ConfigureAwait(false);
+        var finished = await Task.WhenAny(completion.Task, Task.Delay(GrpcTestTimeout)).ConfigureAwait(false);
+        Assert.AreSame(completion.Task, finished, "远程 Worker 在超时时间内未处理完所有消息");
+
         cts.Cancel();
-        await Task.WhenAll(workerTasks).ConfigureAwait(false);
+        await Task.WhenAny(Task.WhenAll(workerTasks), Task.Delay(GrpcTestTimeout)).ConfigureAwait(false);
 
         Assert.AreEqual(workerCount, processedCounts.Count, "部分远程 Worker 未收到任务");
         var counts = processedCounts.Values.ToArray();
@@ -433,7 +436,8 @@ public sealed class TestWorkerSelectionStrategies
         var processedCounts = new ConcurrentDictionary<int, int>();
         var processed = 0;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var cts = new CancellationTokenSource(GrpcTestTimeout);
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(GrpcTestTimeout);
 
         var clients = new List<NamedPipeRemoteWorkerClient>();
         var subscriptions = new List<AsyncServerStreamingCall<DispatcherMessage>>();
@@ -499,9 +503,11 @@ public sealed class TestWorkerSelectionStrategies
             await manager.PublishAsync(i).ConfigureAwait(false);
         }
 
-        await completion.Task.WaitAsync(GrpcTestTimeout).ConfigureAwait(false);
+        var finished = await Task.WhenAny(completion.Task, Task.Delay(GrpcTestTimeout)).ConfigureAwait(false);
+        Assert.AreSame(completion.Task, finished, "远程 Worker (轮询策略) 在超时时间内未处理完所有消息");
+
         cts.Cancel();
-        await Task.WhenAll(workerTasks).ConfigureAwait(false);
+        await Task.WhenAny(Task.WhenAll(workerTasks), Task.Delay(GrpcTestTimeout)).ConfigureAwait(false);
 
         Assert.AreEqual(workerCount, processedCounts.Count, "部分远程 Worker 未收到任务");
         var counts = processedCounts.Values.ToArray();

@@ -36,6 +36,9 @@ dotnet add package FlexibleAckDispatcher.GrpcServer
 # 命名管道 gRPC 客户端
 dotnet add package FlexibleAckDispatcher.GrpcClient
 
+# 共享 gRPC Proto 契约（服务端/客户端双方都可引用）
+dotnet add package FlexibleAckDispatcher.GrpcContracts
+
 # 仅需共享模型/接口时
 dotnet add package FlexibleAckDispatcher.Abstractions
 ```
@@ -48,6 +51,7 @@ FlexibleAckDispatcher/
 │   ├── FlexibleAckDispatcher.Abstractions/           # 对外公共模型与接口
 │   ├── FlexibleAckDispatcher.InMemory.Core/          # 核心内存调度实现
 │   ├── FlexibleAckDispatcher.InMemory.Remote/        # 远程桥接扩展（依赖 Core + gRPC）
+│   ├── FlexibleAckDispatcher.GrpcContracts/          # gRPC Proto 契约定义与生成代码
 │   ├── FlexibleAckDispatcher.GrpcServer/             # 命名管道 gRPC 服务端实现
 │   └── FlexibleAckDispatcher.GrpcClient/             # 命名管道 gRPC 客户端封装
 └── Test/                                             # 单元与集成测试
@@ -234,7 +238,89 @@ var handler = new OrderMessageHandler();
 await manager.SubscribeAsync<int>(handler, options => options.WithPrefetch(5));
 ```
 
-### 7. 动态订阅与取消订阅
+### 7. 远程 Worker（命名管道 + gRPC）
+
+> 主进程负责调度，远程进程通过命名管道注册 Worker 并处理任务。
+
+**主进程（Dispatcher）：**
+
+```csharp
+using FlexibleAckDispatcher.InMemory.Core;
+using FlexibleAckDispatcher.InMemory.Remote;
+using Microsoft.Extensions.Logging.Abstractions;
+
+var pipeName = "my-remote-pipe";
+
+await using var manager = PubSubManager.Create(options =>
+    options.WithLogger(NullLogger.Instance)
+           .UseNamedPipeRemote(remote =>
+           {
+               remote.PipeName = pipeName;
+               remote.MaxConcurrentSessions = 8; // 允许的远程 Worker 会话数
+           }));
+
+// 如果仍有本地 Worker，也可以同时订阅
+await manager.SubscribeAsync<int>(async (message, ct) =>
+{
+    Console.WriteLine($"本地处理: {message.Payload}");
+    await message.AckAsync();
+});
+
+// 持续运行监听远程 Worker
+Console.WriteLine("Dispatcher is ready. Press Enter to exit.");
+Console.ReadLine();
+```
+
+**远程进程（Worker 客户端）：**
+
+```csharp
+using System.Text.Json;
+using FlexibleAckDispatcher.Abstractions.Remote;
+using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
+using FlexibleAckDispatcher.GrpcServer.Protos;
+
+var pipeName = "my-remote-pipe";
+
+await using var client = NamedPipeRemoteWorkerClient.Create(options =>
+    options.WithPipeName(pipeName)
+           .WithAutoHeartbeat(TimeSpan.FromSeconds(5)));
+
+var registerReply = await client.RegisterAsync(options =>
+    options.WithWorkerName("PaymentWorker")
+           .WithPrefetch(20)
+           .WithConcurrencyLimit(5)
+           .WithMetadata(RemoteWorkerMetadataKeys.MessageType, typeof(int).AssemblyQualifiedName ?? typeof(int).FullName ?? "System.Int32"));
+
+var workerId = registerReply.WorkerId;
+var subscription = client.SubscribeAsync(options => options.WithWorkerId(workerId));
+
+try
+{
+    while (await subscription.ResponseStream.MoveNext(CancellationToken.None))
+    {
+        var message = subscription.ResponseStream.Current;
+        if (message.Task is null)
+        {
+            continue;
+        }
+
+        var payload = JsonSerializer.Deserialize<int>(message.Task.Payload.Span)!;
+        Console.WriteLine($"远程 Worker 接收到任务: {message.Task.DeliveryTag}, payload={payload}");
+
+        // TODO: 处理业务逻辑
+
+        await client.AckAsync(options =>
+            options.WithWorkerId(workerId)
+                   .WithDeliveryTag(message.Task.DeliveryTag));
+    }
+}
+finally
+{
+    subscription.Dispose();
+}
+```
+
+### 8. 动态订阅与取消订阅
 
 ```csharp
 // 添加订阅
