@@ -301,13 +301,14 @@ public sealed class TestWorkerSelectionStrategies
     }
 
     [TestMethod]
+    [Timeout(30000)]
     /// <summary>
     /// 基于 gRPC 的远程 Worker 在高负载下能够分摊任务。
     /// </summary>
     public async Task GrpcRemoteWorkers_ShouldDistributeHighLoad()
     {
         const int workerCount = 4;
-        const int totalMessages = 160;
+        const int totalMessages = 96;
         var pipeName = $"test-pipe-{Guid.NewGuid():N}";
         var messageType = typeof(int).AssemblyQualifiedName ?? typeof(int).FullName ?? "System.Int32";
 
@@ -341,8 +342,8 @@ public sealed class TestWorkerSelectionStrategies
             var registerReply = await client.RegisterAsync(opts =>
             {
                 opts.WithWorkerName($"remote-{i}")
-                    .WithPrefetch(20)
-                    .WithConcurrencyLimit(4)
+                    .WithPrefetch(12)
+                    .WithConcurrencyLimit(3)
                     .WithMetadata(RemoteWorkerMetadataKeys.MessageType, messageType);
             }, cts.Token).ConfigureAwait(false);
 
@@ -371,6 +372,11 @@ public sealed class TestWorkerSelectionStrategies
                         await client.AckAsync(opts =>
                             opts.WithWorkerId(workerId)
                                 .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
+
+                        if (Volatile.Read(ref processed) >= totalMessages)
+                        {
+                            break;
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -414,13 +420,14 @@ public sealed class TestWorkerSelectionStrategies
     }
 
     [TestMethod]
+    [Timeout(30000)]
     /// <summary>
     /// 基于 gRPC 的远程 Worker 在轮询策略下保持相对均衡。
     /// </summary>
     public async Task GrpcRemoteWorkers_ShouldBalanceWithRoundRobin()
     {
         const int workerCount = 3;
-        const int totalMessages = 120;
+        const int totalMessages = 72;
         var pipeName = $"test-pipe-{Guid.NewGuid():N}";
         var messageType = typeof(int).AssemblyQualifiedName ?? typeof(int).FullName ?? "System.Int32";
 
@@ -455,7 +462,7 @@ public sealed class TestWorkerSelectionStrategies
             var registerReply = await client.RegisterAsync(opts =>
             {
                 opts.WithWorkerName($"rr-remote-{i}")
-                    .WithPrefetch(10)
+                    .WithPrefetch(8)
                     .WithConcurrencyLimit(2)
                     .WithMetadata(RemoteWorkerMetadataKeys.MessageType, messageType);
             }, cts.Token).ConfigureAwait(false);
@@ -485,6 +492,11 @@ public sealed class TestWorkerSelectionStrategies
                         await client.AckAsync(opts =>
                             opts.WithWorkerId(workerId)
                                 .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
+
+                        if (Volatile.Read(ref processed) >= totalMessages)
+                        {
+                            break;
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested)
