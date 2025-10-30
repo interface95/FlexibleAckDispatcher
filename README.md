@@ -18,22 +18,26 @@
 
 ## 📦 安装
 
-### NuGet 包管理器
+### 必备包
 
 ```bash
-dotnet add package InMemoryWorkerBalancer
+dotnet add package FlexibleAckDispatcher.InMemory.Core
 ```
 
-### Package Manager Console
+### 可选扩展
 
-```powershell
-Install-Package InMemoryWorkerBalancer
-```
+```bash
+# 远程桥接（命名管道 + gRPC）
+dotnet add package FlexibleAckDispatcher.InMemory.Remote
 
-### .csproj 文件
+# 命名管道 gRPC 服务端
+dotnet add package FlexibleAckDispatcher.GrpcServer
 
-```xml
-<PackageReference Include="InMemoryWorkerBalancer" Version="1.0.0" />
+# 命名管道 gRPC 客户端
+dotnet add package FlexibleAckDispatcher.GrpcClient
+
+# 仅需共享模型/接口时
+dotnet add package FlexibleAckDispatcher.Abstractions
 ```
 
 ## 📂 项目结构
@@ -41,32 +45,15 @@ Install-Package InMemoryWorkerBalancer
 ```
 FlexibleAckDispatcher/
 ├── src/
-│   └── InMemoryWorkerBalancer/           # 核心库
-│       ├── Abstractions/                  # 对外接口
-│       │   ├── IWorkerMessageHandler.cs   # 消息处理器接口
-│       │   ├── IPubSubChannel.cs          # 发布通道接口
-│       │   ├── IPubSubManager.cs          # 管理器接口
-│       │   ├── IPubSubSubscription.cs     # 订阅句柄接口
-│       │   └── IWorkerPayloadSerializer.cs # 负载序列化器接口
-│       ├── Internal/                      # 内部实现
-│       │   ├── WorkerDispatcher.cs        # 消息调度器
-│       │   ├── WorkerEndpoint.cs         # Worker 端点
-│       │   ├── WorkerManager.cs          # Worker 管理器
-│       │   ├── WorkerProcessor.cs         # Worker 处理器
-│       │   ├── WorkerDeliveryContext.cs  # 消息传递上下文
-│       │   ├── WorkerCapacity.cs         # Worker 容量控制
-│       │   ├── WorkerAckToken.cs         # ACK 令牌
-│       │   ├── PubSubSubscription.cs      # 订阅实现
-│       │   └── SnowflakeIdGenerator.cs    # 雪花 ID 生成器
-│       ├── JsonWorkerPayloadSerializer.cs # 默认 JSON 序列化器
-│       ├── PubSubManager.cs               # 发布订阅管理器（核心）
-│       ├── PubSubManagerOptions.cs        # 管理器配置选项
-│       ├── SubscriptionOptions.cs         # 订阅配置选项
-│       ├── WorkerEndpointSnapshot.cs      # Worker 快照结构
-│       ├── WorkerMessage.cs               # 消息包装器
-│       └── WorkerProcessingDelegate.cs    # 处理委托
-└── Test/
-    └── TestWorkerBalancerPubSub.cs       # 综合测试
+│   ├── FlexibleAckDispatcher.Abstractions/           # 对外公共模型与接口
+│   ├── FlexibleAckDispatcher.InMemory.Core/          # 核心内存调度实现
+│   ├── FlexibleAckDispatcher.InMemory.Remote/        # 远程桥接扩展（依赖 Core + gRPC）
+│   ├── FlexibleAckDispatcher.GrpcServer/             # 命名管道 gRPC 服务端实现
+│   └── FlexibleAckDispatcher.GrpcClient/             # 命名管道 gRPC 客户端封装
+└── Test/                                             # 单元与集成测试
+    ├── TestWorkerBalancerPubSub.cs
+    ├── TestWorkerSelectionStrategies.cs
+    └── TestNamedPipeRemoteBridge.cs
 ```
 
 ## 🏗️ 架构设计
@@ -92,7 +79,7 @@ FlexibleAckDispatcher/
 ### 1. 基本用法
 
 ```csharp
-using InMemoryWorkerBalancer;
+using FlexibleAckDispatcher.InMemory.Core;
 
 // 创建 PubSubManager，使用默认 JSON 序列化和 NullLogger
 await using var manager = PubSubManager.Create();
@@ -225,7 +212,7 @@ for (int i = 0; i < 30; i++)
 ### 6. 使用接口方式（推荐用于复杂业务）
 
 ```csharp
-using InMemoryWorkerBalancer.Abstractions;
+using FlexibleAckDispatcher.Abstractions;
 
 public class OrderMessageHandler : IWorkerMessageHandler<int>
 {
@@ -608,7 +595,7 @@ dotnet test
 
 - [GitHub Repository](https://github.com/interface95/FlexibleAckDispatcher)
 - [Issue Tracker](https://github.com/interface95/FlexibleAckDispatcher/issues)
-- [NuGet Package](https://www.nuget.org/packages/InMemoryWorkerBalancer)
+- [NuGet Package (Core)](https://www.nuget.org/packages/FlexibleAckDispatcher.InMemory.Core)
 
 ### 使用建议
 

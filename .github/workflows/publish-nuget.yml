@@ -12,76 +12,86 @@ permissions:
 
 env:
   DOTNET_VERSION: '9.0.x'
-  PROJECT_PATH: 'src/InMemoryWorkerBalancer/InMemoryWorkerBalancer.csproj'
+  SOLUTION_FILE: 'FlexibleAckDispatcher.sln'
+  PROJECTS: |
+    src/FlexibleAckDispatcher.Abstractions/FlexibleAckDispatcher.Abstractions.csproj
+    src/FlexibleAckDispatcher.GrpcServer/FlexibleAckDispatcher.GrpcServer.csproj
+    src/FlexibleAckDispatcher.GrpcClient/FlexibleAckDispatcher.GrpcClient.csproj
+    src/FlexibleAckDispatcher.InMemory.Core/FlexibleAckDispatcher.InMemory.Core.csproj
+    src/FlexibleAckDispatcher.InMemory.Remote/FlexibleAckDispatcher.InMemory.Remote.csproj
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # 获取完整历史记录
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Restore dependencies
-      run: dotnet restore ${{ env.PROJECT_PATH }}
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.SOLUTION_FILE }}
 
-    - name: Build
-      run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
+      - name: Build solution
+        run: dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore
 
-    - name: Run tests
-      run: dotnet test --configuration Release --no-build --verbosity normal
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build --verbosity normal
 
-    - name: Extract version from tag
-      id: get_version
-      run: |
-        if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/v}
-        else
-          VERSION="1.0.0-preview.${GITHUB_RUN_NUMBER}"
-        fi
-        echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-        echo "Package version: ${VERSION}"
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="1.0.0-preview.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Package version: ${VERSION}"
 
-    - name: Pack NuGet package
-      run: |
-        dotnet pack ${{ env.PROJECT_PATH }} \
-          --configuration Release \
-          --no-build \
-          --output ./nupkg \
-          /p:PackageVersion=${{ steps.get_version.outputs.VERSION }}
+      - name: Pack NuGet packages
+        run: |
+          mkdir -p ./nupkg
+          echo "Packing projects:"
+          while IFS= read -r project; do
+            echo " - $project"
+            dotnet pack "$project" \
+              --configuration Release \
+              --no-build \
+              --output ./nupkg \
+              /p:PackageVersion=${{ steps.get_version.outputs.VERSION }}
+          done <<< "${{ env.PROJECTS }}"
 
-    - name: List generated packages
-      run: ls -la ./nupkg
+      - name: List generated packages
+        run: ls -la ./nupkg
 
-    - name: Publish to NuGet.org
-      run: |
-        dotnet nuget push ./nupkg/*.nupkg \
-          --api-key ${{ secrets.NUGET_API_KEY }} \
-          --source https://api.nuget.org/v3/index.json \
-          --skip-duplicate
-      env:
-        NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      - name: Publish to NuGet.org
+        run: |
+          dotnet nuget push ./nupkg/*.nupkg \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: ./nupkg/*.nupkg
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ./nupkg/*.nupkg
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: nuget-packages
-        path: ./nupkg/*.nupkg
-        retention-days: 30
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nupkg/*.nupkg
+          retention-days: 30
 
