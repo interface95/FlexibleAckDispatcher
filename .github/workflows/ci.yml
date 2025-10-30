@@ -13,6 +13,15 @@ permissions:
 
 env:
   DOTNET_VERSION: '9.0.x'
+  SOLUTION_FILE: 'FlexibleAckDispatcher.sln'
+  PREVIEW_VERSION_PREFIX: '1.0.0-preview'
+  PROJECTS: |
+    src/FlexibleAckDispatcher.Abstractions/FlexibleAckDispatcher.Abstractions.csproj
+    src/FlexibleAckDispatcher.GrpcContracts/FlexibleAckDispatcher.GrpcContracts.csproj
+    src/FlexibleAckDispatcher.GrpcServer/FlexibleAckDispatcher.GrpcServer.csproj
+    src/FlexibleAckDispatcher.GrpcClient/FlexibleAckDispatcher.GrpcClient.csproj
+    src/FlexibleAckDispatcher.InMemory.Core/FlexibleAckDispatcher.InMemory.Core.csproj
+    src/FlexibleAckDispatcher.InMemory.Remote/FlexibleAckDispatcher.InMemory.Remote.csproj
 
 jobs:
   build-and-test:
@@ -35,13 +44,13 @@ jobs:
       run: dotnet --info
 
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore ${{ env.SOLUTION_FILE }}
 
     - name: Build
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore
 
     - name: Run tests
-      run: dotnet test --configuration Release --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+      run: dotnet test ${{ env.SOLUTION_FILE }} --configuration Release --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -65,18 +74,24 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore ${{ env.SOLUTION_FILE }}
 
     - name: Build
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore
 
     - name: Pack (preview)
       run: |
-        dotnet pack src/InMemoryWorkerBalancer/InMemoryWorkerBalancer.csproj \
-          --configuration Release \
-          --no-build \
-          --output ./nupkg \
-          /p:PackageVersion=1.0.0-preview.${{ github.run_number }}
+        mkdir -p ./nupkg
+        VERSION=${{ env.PREVIEW_VERSION_PREFIX }}.${{ github.run_number }}
+        echo "Packing preview packages (${VERSION})"
+        while IFS= read -r project; do
+          echo " - $project"
+          dotnet pack "$project" \
+            --configuration Release \
+            --no-build \
+            --output ./nupkg \
+            /p:PackageVersion=${VERSION}
+        done <<< "${{ env.PROJECTS }}"
 
     - name: Upload package artifact
       uses: actions/upload-artifact@v4
