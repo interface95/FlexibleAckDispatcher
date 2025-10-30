@@ -76,6 +76,7 @@ public sealed class PubSubManager : IPubSubManager
     {
         var options = new PubSubManagerOptions();
         configure?.Invoke(options);
+        options.ApplyModules();
         options.Validate();
         return new PubSubManager(options);
     }

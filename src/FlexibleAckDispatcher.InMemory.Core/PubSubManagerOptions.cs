@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions;
+using FlexibleAckDispatcher.InMemory.Core.Modules;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SubscriptionDefaults = FlexibleAckDispatcher.Abstractions.SubscriptionDefaults;
@@ -17,6 +18,7 @@ public sealed class PubSubManagerOptions
     private readonly List<Func<WorkerEndpointSnapshot, Task>> _workerRemovedHandlers = new();
     private readonly List<Action<PubSubManager>> _managerInitializers = new();
     private readonly List<Func<PubSubManager, ValueTask>> _managerDisposers = new();
+    private readonly List<IPubSubManagerModule> _modules = new();
     private readonly Dictionary<string, object> _features = new(StringComparer.Ordinal);
 
     private IWorkerPayloadSerializer _serializer = JsonWorkerPayloadSerializer.Default;
@@ -81,6 +83,16 @@ public sealed class PubSubManagerOptions
         }
 
         _workerRemovedHandlers.Add(handler);
+        return this;
+    }
+
+    /// <summary>
+    /// 注册一个模块，在创建 <see cref="PubSubManager"/> 之前执行额外配置。
+    /// </summary>
+    public PubSubManagerOptions AddModule(IPubSubManagerModule module)
+    {
+        ArgumentNullException.ThrowIfNull(module);
+        _modules.Add(module);
         return this;
     }
 
@@ -287,6 +299,21 @@ public sealed class PubSubManagerOptions
             throw new InvalidOperationException(
                 $"Default AckTimeout ({_defaultAckTimeout.Value}) must be greater than zero.");
         }
+    }
+
+    internal void ApplyModules()
+    {
+        if (_modules.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var module in _modules)
+        {
+            module.Configure(this);
+        }
+
+        _modules.Clear();
     }
 }
 

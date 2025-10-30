@@ -1,10 +1,9 @@
 using System;
-using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions.Remote;
 using FlexibleAckDispatcher.GrpcServer.NamedPipe;
 using FlexibleAckDispatcher.InMemory.Core;
-using FlexibleAckDispatcher.InMemory.Remote;
-using Microsoft.Extensions.Logging;
+using FlexibleAckDispatcher.InMemory.Core.Modules;
+using FlexibleAckDispatcher.InMemory.Remote.Modules;
 
 namespace FlexibleAckDispatcher.InMemory.Remote;
 
@@ -13,8 +12,6 @@ namespace FlexibleAckDispatcher.InMemory.Remote;
 /// </summary>
 public static class PubSubManagerOptionsExtensions
 {
-    private const string RemoteFeatureKey = "FlexibleAckDispatcher.RemoteBridge";
-
     /// <summary>
     /// 配置远程 Worker 桥接器，用于跨进程任务分发。
     /// </summary>
@@ -23,50 +20,35 @@ public static class PubSubManagerOptionsExtensions
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(bridge);
 
-        var feature = new RemoteBridgeFeature(bridge);
-        options.SetFeature(RemoteFeatureKey, feature);
-
-        options.RegisterInitializer(manager =>
-        {
-            manager.Logger.LogInformation("Remote worker bridge configured: {BridgeType}", feature.Bridge.GetType().Name);
-            feature.Bridge.StartAsync(default).GetAwaiter().GetResult();
-            feature.Coordinator = new RemoteWorkerCoordinator(manager.WorkerManager, feature.Bridge, manager.Logger, manager.SubscriptionDefaults);
-        });
-
-        options.RegisterDisposer(async manager =>
-        {
-            if (feature.Coordinator is not null)
-            {
-                await feature.Coordinator.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await feature.Bridge.DisposeAsync().ConfigureAwait(false);
-        });
-
-        return options;
+        return options.AddModule(new RemoteBridgeModule(bridge));
     }
 
     /// <summary>
-    /// 配置远程 Worker 桥接器（命名管道实现）。
+    /// 通过工厂配置远程 Worker 桥接器，用于跨进程任务分发。
+    /// </summary>
+    public static PubSubManagerOptions WithRemoteWorkerBridge(this PubSubManagerOptions options, Func<IRemoteWorkerBridge> bridgeFactory)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(bridgeFactory);
+
+        return options.AddModule(new RemoteBridgeModule(bridgeFactory));
+    }
+
+    /// <summary>
+    /// 配置命名管道实现的远程 Worker 桥接器。
     /// </summary>
     public static PubSubManagerOptions WithRemoteWorkerBridge(this PubSubManagerOptions options, Action<NamedPipeRemoteWorkerOptions>? configure)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var bridgeOptions = new NamedPipeRemoteWorkerOptions();
-        configure?.Invoke(bridgeOptions);
-        return options.WithRemoteWorkerBridge(new NamedPipeRemoteWorkerBridge(bridgeOptions));
+        return options.AddModule(new NamedPipeRemoteModule(configure));
     }
 
-    private sealed class RemoteBridgeFeature
+    /// <summary>
+    /// 使用模块化方式注册命名管道远程桥。
+    /// </summary>
+    public static PubSubManagerOptions UseNamedPipeRemote(this PubSubManagerOptions options, Action<NamedPipeRemoteWorkerOptions>? configure = null)
     {
-        public RemoteBridgeFeature(IRemoteWorkerBridge bridge)
-        {
-            Bridge = bridge;
-        }
-
-        public IRemoteWorkerBridge Bridge { get; }
-
-        public RemoteWorkerCoordinator? Coordinator { get; set; }
+        return options.WithRemoteWorkerBridge(configure);
     }
 }
