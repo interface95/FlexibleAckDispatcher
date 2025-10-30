@@ -87,9 +87,9 @@ jobs:
         while IFS= read -r project; do
           echo " - $project"
           dotnet pack "$project" \
-            --configuration Release \
-            --no-build \
-            --output ./nupkg \
+          --configuration Release \
+          --no-build \
+          --output ./nupkg \
             /p:PackageVersion=${VERSION}
         done <<< "${{ env.PROJECTS }}"
 

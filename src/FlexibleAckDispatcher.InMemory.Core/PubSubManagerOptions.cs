@@ -263,55 +263,55 @@ public sealed class PubSubManagerOptions
 
         // 验证 AckMonitorInterval 的合理性
         if (_ackMonitorInterval.HasValue && _ackMonitorInterval.Value <= TimeSpan.Zero)
-        {
-            throw new InvalidOperationException(
-                $"AckMonitorInterval ({_ackMonitorInterval.Value}) must be greater than zero.");
-        }
+            {
+                throw new InvalidOperationException(
+                    $"AckMonitorInterval ({_ackMonitorInterval.Value}) must be greater than zero.");
+            }
 
         // 验证默认值范围
         if (_defaultPrefetch.HasValue && _defaultPrefetch.Value <= 0)
-        {
-            throw new InvalidOperationException(
-                $"Default Prefetch ({_defaultPrefetch.Value}) must be greater than zero.");
-        }
+            {
+                throw new InvalidOperationException(
+                    $"Default Prefetch ({_defaultPrefetch.Value}) must be greater than zero.");
+            }
 
         if (_defaultConcurrencyLimit.HasValue &&
             (_defaultConcurrencyLimit.Value <= 0 || _defaultConcurrencyLimit.Value > SubscriptionOptions.MaxConcurrencyLimit))
-        {
-            throw new InvalidOperationException(
+            {
+                throw new InvalidOperationException(
                 $"Default ConcurrencyLimit ({_defaultConcurrencyLimit.Value}) must be between 1 and {SubscriptionOptions.MaxConcurrencyLimit}.");
-        }
+            }
 
         if (_defaultHandlerTimeout.HasValue && _defaultHandlerTimeout.Value <= TimeSpan.Zero)
-        {
-            throw new InvalidOperationException(
-                $"Default HandlerTimeout ({_defaultHandlerTimeout.Value}) must be greater than zero.");
-        }
+            {
+                throw new InvalidOperationException(
+                    $"Default HandlerTimeout ({_defaultHandlerTimeout.Value}) must be greater than zero.");
+            }
 
         if (_defaultFailureThreshold.HasValue && _defaultFailureThreshold.Value <= 0)
-        {
-            throw new InvalidOperationException(
-                $"Default FailureThreshold ({_defaultFailureThreshold.Value}) must be greater than zero.");
-        }
+            {
+                throw new InvalidOperationException(
+                    $"Default FailureThreshold ({_defaultFailureThreshold.Value}) must be greater than zero.");
+            }
 
         if (_defaultAckTimeout.HasValue && _defaultAckTimeout.Value <= TimeSpan.Zero)
-        {
-            throw new InvalidOperationException(
-                $"Default AckTimeout ({_defaultAckTimeout.Value}) must be greater than zero.");
-        }
+            {
+                throw new InvalidOperationException(
+                    $"Default AckTimeout ({_defaultAckTimeout.Value}) must be greater than zero.");
+            }
     }
 
     internal void ApplyModules()
     {
         if (_modules.Count == 0)
-        {
+                {
             return;
-        }
+                }
 
         foreach (var module in _modules)
         {
             module.Configure(this);
-        }
+            }
 
         _modules.Clear();
     }

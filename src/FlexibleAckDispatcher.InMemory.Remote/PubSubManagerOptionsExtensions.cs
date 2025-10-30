@@ -48,7 +48,7 @@ public static class PubSubManagerOptionsExtensions
     /// 使用模块化方式注册命名管道远程桥。
     /// </summary>
     public static PubSubManagerOptions UseNamedPipeRemote(this PubSubManagerOptions options, Action<NamedPipeRemoteWorkerOptions>? configure = null)
-    {
+        {
         return options.WithRemoteWorkerBridge(configure);
     }
 }

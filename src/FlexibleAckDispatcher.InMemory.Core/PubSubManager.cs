@@ -60,7 +60,7 @@ public sealed class PubSubManager : IPubSubManager
         {
             initializer(this);
         }
-
+        
         _dispatchTask = Task.Factory.StartNew(
                 () => _dispatcher.ProcessAsync(_channel.Reader, _workerManager, _cancellation.Token),
                 CancellationToken.None,
@@ -248,7 +248,7 @@ public sealed class PubSubManager : IPubSubManager
     internal async Task RemoveSubscriptionAsync(int subscriptionId)
     {
         if (_subscriptions.TryRemove(subscriptionId, out _))
-        {
+    {
             await _workerManager.RemoveWorkerAsync(subscriptionId).ConfigureAwait(false);
             _logger.LogInformation("Subscription {SubscriptionId} removed", subscriptionId);
         }
@@ -259,7 +259,7 @@ public sealed class PubSubManager : IPubSubManager
         return (IPubSubChannel<T>)_typedChannels.GetOrAdd(typeof(T),
             _ => new TypedPubSubChannel<T>(_channel.Writer, _serializer, _workerManager));
     }
-
+    
     private void AttachWorkerLifecycleHandlers(PubSubManagerOptions options)
     {
         foreach (var handler in options.WorkerAddedHandlers)
