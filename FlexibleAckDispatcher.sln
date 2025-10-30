@@ -14,6 +14,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.InMem
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.InMemory.Remote", "src\FlexibleAckDispatcher.InMemory.Remote\FlexibleAckDispatcher.InMemory.Remote.csproj", "{E5095365-5D3D-4169-9096-7454B672765C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.GrpcContracts", "src\FlexibleAckDispatcher.GrpcContracts\FlexibleAckDispatcher.GrpcContracts.csproj", "{1D69DD64-3A44-4A2D-A81E-E70714E91847}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -96,6 +98,18 @@ Global
 		{E5095365-5D3D-4169-9096-7454B672765C}.Release|x64.Build.0 = Release|Any CPU
 		{E5095365-5D3D-4169-9096-7454B672765C}.Release|x86.ActiveCfg = Release|Any CPU
 		{E5095365-5D3D-4169-9096-7454B672765C}.Release|x86.Build.0 = Release|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Debug|x64.Build.0 = Debug|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Debug|x86.Build.0 = Debug|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Release|x64.ActiveCfg = Release|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Release|x64.Build.0 = Release|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Release|x86.ActiveCfg = Release|Any CPU
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -106,5 +120,6 @@ Global
 		{23A16476-3719-45F5-8B1B-BF0E3DE6ACD2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{59EA477C-9031-4A56-9E1E-B5AC2A3A6DD9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E5095365-5D3D-4169-9096-7454B672765C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{1D69DD64-3A44-4A2D-A81E-E70714E91847} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

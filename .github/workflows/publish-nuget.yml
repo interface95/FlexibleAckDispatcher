@@ -15,6 +15,7 @@ env:
   SOLUTION_FILE: 'FlexibleAckDispatcher.sln'
   PROJECTS: |
     src/FlexibleAckDispatcher.Abstractions/FlexibleAckDispatcher.Abstractions.csproj
+    src/FlexibleAckDispatcher.GrpcContracts/FlexibleAckDispatcher.GrpcContracts.csproj
     src/FlexibleAckDispatcher.GrpcServer/FlexibleAckDispatcher.GrpcServer.csproj
     src/FlexibleAckDispatcher.GrpcClient/FlexibleAckDispatcher.GrpcClient.csproj
     src/FlexibleAckDispatcher.InMemory.Core/FlexibleAckDispatcher.InMemory.Core.csproj

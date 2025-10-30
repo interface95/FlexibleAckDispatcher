@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>FlexibleAckDispatcher.GrpcContracts</PackageId>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Description>Shared gRPC contract definitions for FlexibleAckDispatcher remote worker communication.</Description>
+    <PackageTags>grpc;contracts;proto;dispatcher;worker</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.29.3" />
+    <PackageReference Include="Grpc.Core" Version="2.46.6" />
+    <PackageReference Include="Grpc.Tools" Version="2.63.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protocols/RemoteWorker.proto" GrpcServices="Both" />
+  </ItemGroup>
+</Project>

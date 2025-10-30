@@ -1,11 +1,18 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions;
+using FlexibleAckDispatcher.Abstractions.Remote;
+using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
+using FlexibleAckDispatcher.GrpcServer.Protos;
 using FlexibleAckDispatcher.InMemory.Core;
 using FlexibleAckDispatcher.InMemory.Core.Internal;
+using FlexibleAckDispatcher.InMemory.Remote;
+using Grpc.Core;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TestProject2;
 
@@ -289,6 +296,223 @@ public sealed class TestWorkerSelectionStrategies
         var finished = await Task.WhenAny(completion.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         Assert.AreSame(completion.Task, finished, "动态增删 Worker 后消息未正常处理");
         Assert.AreEqual(30, processed);
+    }
+
+    [TestMethod]
+    /// <summary>
+    /// 基于 gRPC 的远程 Worker 在高负载下能够分摊任务。
+    /// </summary>
+    public async Task GrpcRemoteWorkers_ShouldDistributeHighLoad()
+    {
+        const int workerCount = 4;
+        const int totalMessages = 200;
+        var pipeName = $"test-pipe-{Guid.NewGuid():N}";
+        var messageType = typeof(int).AssemblyQualifiedName ?? typeof(int).FullName ?? "System.Int32";
+
+        await using var manager = PubSubManager.Create(options =>
+            options.UseNamedPipeRemote(o =>
+            {
+                o.PipeName = pipeName;
+                o.MaxConcurrentSessions = workerCount;
+            })
+            .WithLogger(NullLogger.Instance));
+
+        var processedCounts = new ConcurrentDictionary<int, int>();
+        var processed = 0;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var clients = new List<NamedPipeRemoteWorkerClient>();
+        var subscriptions = new List<AsyncServerStreamingCall<DispatcherMessage>>();
+        var workerTasks = new List<Task>();
+
+        for (var i = 0; i < workerCount; i++)
+        {
+            var client = NamedPipeRemoteWorkerClient.Create(o =>
+            {
+                o.WithPipeName(pipeName)
+                 .WithAutoHeartbeat(TimeSpan.FromSeconds(3));
+            });
+            clients.Add(client);
+
+            var registerReply = await client.RegisterAsync(opts =>
+            {
+                opts.WithWorkerName($"remote-{i}")
+                    .WithPrefetch(20)
+                    .WithConcurrencyLimit(4)
+                    .WithMetadata(RemoteWorkerMetadataKeys.MessageType, messageType);
+            }, cts.Token).ConfigureAwait(false);
+
+            var workerId = registerReply.WorkerId;
+            var subscription = client.SubscribeAsync(opts => opts.WithWorkerId(workerId), cts.Token);
+            subscriptions.Add(subscription);
+
+            workerTasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    while (await subscription.ResponseStream.MoveNext(cts.Token).ConfigureAwait(false))
+                    {
+                        var message = subscription.ResponseStream.Current;
+                        if (message.Task is null)
+                        {
+                            continue;
+                        }
+
+                        processedCounts.AddOrUpdate(workerId, 1, static (_, count) => count + 1);
+                        if (Interlocked.Increment(ref processed) == totalMessages)
+                        {
+                            completion.TrySetResult();
+                        }
+
+                        await client.AckAsync(opts =>
+                            opts.WithWorkerId(workerId)
+                                .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                }
+                catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cts.IsCancellationRequested)
+                {
+                }
+            }));
+        }
+
+        for (var i = 0; i < totalMessages; i++)
+        {
+            await manager.PublishAsync(i).ConfigureAwait(false);
+        }
+
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        cts.Cancel();
+        await Task.WhenAll(workerTasks).ConfigureAwait(false);
+
+        Assert.AreEqual(workerCount, processedCounts.Count, "部分远程 Worker 未收到任务");
+        var counts = processedCounts.Values.ToArray();
+        var min = counts.Min();
+        var max = counts.Max();
+        Assert.IsTrue(max - min <= totalMessages * 0.4,
+            $"远程负载分配过于不均：最少 {min}，最多 {max}");
+
+        foreach (var subscription in subscriptions)
+        {
+            subscription.Dispose();
+        }
+
+        foreach (var client in clients)
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
+    /// <summary>
+    /// 基于 gRPC 的远程 Worker 在轮询策略下保持相对均衡。
+    /// </summary>
+    public async Task GrpcRemoteWorkers_ShouldBalanceWithRoundRobin()
+    {
+        const int workerCount = 3;
+        const int totalMessages = 150;
+        var pipeName = $"test-pipe-{Guid.NewGuid():N}";
+        var messageType = typeof(int).AssemblyQualifiedName ?? typeof(int).FullName ?? "System.Int32";
+
+        await using var manager = PubSubManager.Create(options =>
+            options.WithSelectionStrategy(() => new RoundRobinSelectionStrategy())
+                   .UseNamedPipeRemote(o =>
+                   {
+                       o.PipeName = pipeName;
+                       o.MaxConcurrentSessions = workerCount;
+                   })
+                   .WithLogger(NullLogger.Instance));
+
+        var processedCounts = new ConcurrentDictionary<int, int>();
+        var processed = 0;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var clients = new List<NamedPipeRemoteWorkerClient>();
+        var subscriptions = new List<AsyncServerStreamingCall<DispatcherMessage>>();
+        var workerTasks = new List<Task>();
+
+        for (var i = 0; i < workerCount; i++)
+        {
+            var client = NamedPipeRemoteWorkerClient.Create(o =>
+            {
+                o.WithPipeName(pipeName)
+                 .WithAutoHeartbeat(TimeSpan.FromSeconds(3));
+            });
+            clients.Add(client);
+
+            var registerReply = await client.RegisterAsync(opts =>
+            {
+                opts.WithWorkerName($"rr-remote-{i}")
+                    .WithPrefetch(10)
+                    .WithConcurrencyLimit(2)
+                    .WithMetadata(RemoteWorkerMetadataKeys.MessageType, messageType);
+            }, cts.Token).ConfigureAwait(false);
+
+            var workerId = registerReply.WorkerId;
+            var subscription = client.SubscribeAsync(opts => opts.WithWorkerId(workerId), cts.Token);
+            subscriptions.Add(subscription);
+
+            workerTasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    while (await subscription.ResponseStream.MoveNext(cts.Token).ConfigureAwait(false))
+                    {
+                        var message = subscription.ResponseStream.Current;
+                        if (message.Task is null)
+                        {
+                            continue;
+                        }
+
+                        processedCounts.AddOrUpdate(workerId, 1, static (_, count) => count + 1);
+                        if (Interlocked.Increment(ref processed) == totalMessages)
+                        {
+                            completion.TrySetResult();
+                        }
+
+                        await client.AckAsync(opts =>
+                            opts.WithWorkerId(workerId)
+                                .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                }
+                catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cts.IsCancellationRequested)
+                {
+                }
+            }));
+        }
+
+        for (var i = 0; i < totalMessages; i++)
+        {
+            await manager.PublishAsync(i).ConfigureAwait(false);
+        }
+
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        cts.Cancel();
+        await Task.WhenAll(workerTasks).ConfigureAwait(false);
+
+        Assert.AreEqual(workerCount, processedCounts.Count, "部分远程 Worker 未收到任务");
+        var counts = processedCounts.Values.ToArray();
+        var min = counts.Min();
+        var max = counts.Max();
+        Assert.IsTrue(max - min <= totalMessages / workerCount,
+            $"轮询策略应保持相对均衡：最少 {min}，最多 {max}");
+
+        foreach (var subscription in subscriptions)
+        {
+            subscription.Dispose();
+        }
+
+        foreach (var client in clients)
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
 
