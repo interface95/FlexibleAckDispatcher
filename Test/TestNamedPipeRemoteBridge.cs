@@ -2,13 +2,10 @@ using System;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Google.Protobuf;
-using InMemoryWorkerBalancer;
-using InMemoryWorkerBalancer.Remote;
-using InMemoryWorkerBalancer.Remote.Clients.NamedPipe;
-using InMemoryWorkerBalancer.Remote.NamedPipe;
-using InMemoryWorkerBalancer.Remote.Protos;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using FlexibleAckDispatcher.Abstractions.Remote;
+using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
+using FlexibleAckDispatcher.GrpcServer.NamedPipe;
+using FlexibleAckDispatcher.InMemory;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TestProject2;

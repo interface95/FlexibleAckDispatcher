@@ -18,7 +18,9 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\src\InMemoryWorkerBalancer\InMemoryWorkerBalancer.csproj" />
+      <ProjectReference Include="..\src\FlexibleAckDispatcher.InMemory\FlexibleAckDispatcher.InMemory.csproj" />
+      <ProjectReference Include="..\src\FlexibleAckDispatcher.GrpcServer\FlexibleAckDispatcher.GrpcServer.csproj" />
+      <ProjectReference Include="..\src\FlexibleAckDispatcher.GrpcClient\FlexibleAckDispatcher.GrpcClient.csproj" />
     </ItemGroup>
 
 </Project>

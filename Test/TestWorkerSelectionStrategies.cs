@@ -3,9 +3,9 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using InMemoryWorkerBalancer;
-using InMemoryWorkerBalancer.Internal;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using FlexibleAckDispatcher;
+using FlexibleAckDispatcher.InMemory;
+using FlexibleAckDispatcher.InMemory.Internal;
 
 namespace TestProject2;
 
