@@ -117,17 +117,10 @@ public sealed class TestWorkerSelectionStrategies
                 .WithConcurrencyLimit(1));
         }
 
-        // 等待所有Worker准备就绪
-        await Task.Delay(50);
-
-        // 发送消息（稍微慢一点，给轮询策略更多时间生效）
+        // 发送消息
         for (var i = 0; i < totalMessages; i++)
         {
             await manager.PublishAsync(i);
-            if (i % 3 == 2) // 每3条消息后稍微延迟
-            {
-                await Task.Delay(1);
-            }
         }
 
         var finished = await Task.WhenAny(completion.Task, Task.Delay(TimeSpan.FromSeconds(5)));
@@ -139,14 +132,10 @@ public sealed class TestWorkerSelectionStrategies
         var counts = workerMessageCounts.Values.ToArray();
         var minCount = counts.Min();
         var maxCount = counts.Max();
-        var expectedPerWorker = totalMessages / workerCount;
         
         // 轮询策略应该使消息分布相对均匀
-        // 由于Prefetch(5)和并发处理，在极端情况下可能出现较大偏差
-        // 允许最大差异为总消息数的50%（比如30条消息，允许差异15）
-        var maxAllowedDiff = totalMessages / 2;
-        Assert.IsTrue(maxCount - minCount <= maxAllowedDiff, 
-            $"轮询策略下消息分布严重不均：最少 {minCount}，最多 {maxCount}，期望每个Worker约{expectedPerWorker}条，允许差异<={maxAllowedDiff}");
+        Assert.IsTrue(maxCount - minCount <= totalMessages / workerCount, 
+            $"轮询策略下消息分布不均：最少 {minCount}，最多 {maxCount}");
     }
 
     [TestMethod]
@@ -318,7 +307,7 @@ public sealed class TestWorkerSelectionStrategies
     }
 
     [TestMethod]
-    [Timeout(90000)]
+    [Timeout(60000)]
     /// <summary>
     /// 基于 gRPC 的远程 Worker 在高负载下能够分摊任务。
     /// </summary>
@@ -380,7 +369,6 @@ public sealed class TestWorkerSelectionStrategies
             {
                 try
                 {
-                    Log($"[GrpcHighLoad] Worker {workerId} task started");
                     while (await subscription.ResponseStream.MoveNext(cts.Token).ConfigureAwait(false))
                     {
                         var message = subscription.ResponseStream.Current;
@@ -413,27 +401,15 @@ public sealed class TestWorkerSelectionStrategies
 
                         if (Volatile.Read(ref processed) >= totalMessages)
                         {
-                            Log($"[GrpcHighLoad] Worker {workerId} breaking loop (all messages processed)");
                             break;
                         }
                     }
-                    Log($"[GrpcHighLoad] Worker {workerId} exited message loop normally");
                 }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested)
                 {
-                    Log($"[GrpcHighLoad] Worker {workerId} caught OperationCanceledException");
                 }
                 catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cts.IsCancellationRequested)
                 {
-                    Log($"[GrpcHighLoad] Worker {workerId} caught RpcException (Cancelled)");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[GrpcHighLoad] Worker {workerId} caught unexpected exception: {ex.GetType().Name}: {ex.Message}");
-                }
-                finally
-                {
-                    Log($"[GrpcHighLoad] Worker {workerId} task completed");
                 }
             }));
         }
@@ -470,65 +446,46 @@ public sealed class TestWorkerSelectionStrategies
             Assert.Fail($"远程 Worker 在超时时间内未处理完所有消息。Processed={processed}，Workers={details}，Snapshot={snapshot.Count}");
         }
 
-        Log("[GrpcHighLoad] Starting assertions");
+        Log("[GrpcHighLoad] Starting cleanup");
         Assert.AreEqual(workerCount, processedCounts.Count, "部分远程 Worker 未收到任务");
         var counts = processedCounts.Values.ToArray();
         var min = counts.Min();
         var max = counts.Max();
         Assert.IsTrue(max - min <= totalMessages * 0.5,
             $"远程负载分配过于不均：最少 {min}，最多 {max}");
-        Log("[GrpcHighLoad] Assertions passed");
 
-        // Cleanup: Cancel first to stop all waiting operations
-        Log("[GrpcHighLoad] Cancelling worker tasks");
-        cts.Cancel();
-        
-        // Give a moment for cancellation to propagate
-        await Task.Delay(100).ConfigureAwait(false);
-        Log("[GrpcHighLoad] Cancellation propagated");
-        
-        // Then dispose subscriptions and clients
-        Log("[GrpcHighLoad] Starting cleanup: disposing subscriptions");
+        // Dispose subscriptions first to close gRPC streams
         foreach (var subscription in subscriptions)
         {
             subscription.Dispose();
         }
-        Log("[GrpcHighLoad] Subscriptions disposed");
 
-        Log("[GrpcHighLoad] Disposing clients");
-        for (var i = 0; i < clients.Count; i++)
+        // Dispose clients to close gRPC connections
+        foreach (var client in clients)
         {
-            Log($"[GrpcHighLoad] Disposing client {i}");
-            await clients[i].DisposeAsync().ConfigureAwait(false);
-            Log($"[GrpcHighLoad] Client {i} disposed");
+            await client.DisposeAsync().ConfigureAwait(false);
         }
-        Log("[GrpcHighLoad] All clients disposed");
+        Log("[GrpcHighLoad] Subscriptions and clients disposed");
 
-        // Finally wait for worker tasks to complete
-        Log("[GrpcHighLoad] Waiting for worker tasks to complete (max 5 seconds)");
+        // Cancel to ensure all tasks exit
+        cts.Cancel();
+
+        // Wait for worker tasks to complete
         var allTasksTask = Task.WhenAll(workerTasks);
-        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5));
-        var drainResult = await Task.WhenAny(allTasksTask, timeoutTask).ConfigureAwait(false);
-        if (ReferenceEquals(drainResult, allTasksTask))
+        var drainCompleted = await Task.WhenAny(allTasksTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+        
+        if (ReferenceEquals(drainCompleted, allTasksTask))
         {
-            Log("[GrpcHighLoad] Worker tasks drained successfully");
+            Log("[GrpcHighLoad] All worker tasks completed successfully");
         }
         else
         {
-            Log("[GrpcHighLoad] Worker tasks drain TIMEOUT after 5 seconds");
-            // Log which tasks are still running
-            for (var i = 0; i < workerTasks.Count; i++)
-            {
-                Log($"[GrpcHighLoad] Worker task {i} status: {workerTasks[i].Status}");
-            }
+            Log($"[GrpcHighLoad] WARNING: Worker tasks did not complete within 2 seconds");
         }
-        
-        Log("[GrpcHighLoad] Test method completed, manager will auto-dispose");
-        // Note: manager is disposed automatically when leaving this scope due to 'await using'
     }
 
     [TestMethod]
-    [Timeout(90000)]
+    [Timeout(60000)]
     /// <summary>
     /// 基于 gRPC 的远程 Worker 在轮询策略下保持相对均衡。
     /// </summary>
@@ -538,8 +495,6 @@ public sealed class TestWorkerSelectionStrategies
         const int totalMessages = 48;
         var pipeName = $"test-pipe-{Guid.NewGuid():N}";
         var messageType = typeof(int).AssemblyQualifiedName ?? typeof(int).FullName ?? "System.Int32";
-
-        Log($"[RoundRobin] Manager creating with pipe {pipeName}, expecting {workerCount} workers");
 
         await using var manager = PubSubManager.Create(options =>
             options.WithSelectionStrategy(() => new RoundRobinSelectionStrategy())
@@ -560,8 +515,6 @@ public sealed class TestWorkerSelectionStrategies
         var subscriptions = new List<AsyncServerStreamingCall<DispatcherMessage>>();
         var workerTasks = new List<Task>();
 
-        Log($"[RoundRobin] Setting up {workerCount} workers");
-
         for (var i = 0; i < workerCount; i++)
         {
             var client = NamedPipeRemoteWorkerClient.Create(o =>
@@ -580,7 +533,6 @@ public sealed class TestWorkerSelectionStrategies
             }, cts.Token).ConfigureAwait(false);
 
             var workerId = registerReply.WorkerId;
-            Log($"[RoundRobin] Worker {i} registered with id {workerId}");
             var subscription = client.SubscribeAsync(opts => opts.WithWorkerId(workerId), cts.Token);
             subscriptions.Add(subscription);
 
@@ -588,7 +540,6 @@ public sealed class TestWorkerSelectionStrategies
             {
                 try
                 {
-                    Log($"[RoundRobin] Worker {workerId} task started");
                     while (await subscription.ResponseStream.MoveNext(cts.Token).ConfigureAwait(false))
                     {
                         var message = subscription.ResponseStream.Current;
@@ -597,15 +548,8 @@ public sealed class TestWorkerSelectionStrategies
                             continue;
                         }
 
-                        var count = processedCounts.AddOrUpdate(workerId, 1, static (_, count) => count + 1);
-                        var totalProcessed = Interlocked.Increment(ref processed);
-                        
-                        if (totalProcessed % 10 == 0 || totalProcessed == totalMessages)
-                        {
-                            Log($"[RoundRobin] Worker {workerId} processed message, total: {totalProcessed}/{totalMessages}");
-                        }
-                        
-                        if (totalProcessed == totalMessages)
+                        processedCounts.AddOrUpdate(workerId, 1, static (_, count) => count + 1);
+                        if (Interlocked.Increment(ref processed) == totalMessages)
                         {
                             completion.TrySetResult();
                         }
@@ -614,48 +558,30 @@ public sealed class TestWorkerSelectionStrategies
                             opts.WithWorkerId(workerId)
                                 .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
 
-                        // Check completion status after ack
                         if (Volatile.Read(ref processed) >= totalMessages)
                         {
-                            Log($"[RoundRobin] Worker {workerId} breaking loop (all messages processed)");
                             break;
                         }
                     }
-                    Log($"[RoundRobin] Worker {workerId} exited message loop normally");
                 }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested)
                 {
-                    Log($"[RoundRobin] Worker {workerId} caught OperationCanceledException");
                 }
                 catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cts.IsCancellationRequested)
                 {
-                    Log($"[RoundRobin] Worker {workerId} caught RpcException (Cancelled)");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[RoundRobin] Worker {workerId} caught unexpected exception: {ex.GetType().Name}: {ex.Message}");
-                }
-                finally
-                {
-                    Log($"[RoundRobin] Worker {workerId} task completed");
                 }
             }));
         }
 
         await WaitForRemoteWorkersAsync(manager, workerCount, cts.Token).ConfigureAwait(false);
-        Log("[RoundRobin] All remote workers reported active snapshot");
         await Task.Delay(TimeSpan.FromMilliseconds(500), cts.Token).ConfigureAwait(false);
-        Log("[RoundRobin] Warm-up delay completed");
 
-        Log($"[RoundRobin] Publishing {totalMessages} messages");
         for (var i = 0; i < totalMessages; i++)
         {
             await manager.PublishAsync(i).ConfigureAwait(false);
         }
-        Log("[RoundRobin] Publishing finished, waiting for completion");
 
         var finished = await Task.WhenAny(completion.Task, Task.Delay(GrpcTestTimeout)).ConfigureAwait(false);
-        Log($"[RoundRobin] completion race finished: {ReferenceEquals(finished, completion.Task)}");
         Assert.AreSame(completion.Task, finished, "远程 Worker (轮询策略) 在超时时间内未处理完所有消息");
 
         Log("[RoundRobin] Starting assertions");
@@ -667,50 +593,36 @@ public sealed class TestWorkerSelectionStrategies
             $"轮询策略应保持相对均衡：最少 {min}，最多 {max}");
         Log("[RoundRobin] Assertions passed");
 
-        // Cleanup: Cancel first to stop all waiting operations
-        Log("[RoundRobin] Cancelling worker tasks");
-        cts.Cancel();
-        
-        // Give a moment for cancellation to propagate
-        await Task.Delay(100).ConfigureAwait(false);
-        Log("[RoundRobin] Cancellation propagated");
-        
-        // Then dispose subscriptions and clients
-        Log("[RoundRobin] Starting cleanup: disposing subscriptions");
+        Log("[RoundRobin] Starting cleanup");
+        // Dispose subscriptions first to close gRPC streams
         foreach (var subscription in subscriptions)
         {
             subscription.Dispose();
         }
-        Log("[RoundRobin] Subscriptions disposed");
 
-        Log("[RoundRobin] Disposing clients");
-        for (var i = 0; i < clients.Count; i++)
+        // Dispose clients to close gRPC connections
+        foreach (var client in clients)
         {
-            Log($"[RoundRobin] Disposing client {i}");
-            await clients[i].DisposeAsync().ConfigureAwait(false);
-            Log($"[RoundRobin] Client {i} disposed");
+            await client.DisposeAsync().ConfigureAwait(false);
         }
-        Log("[RoundRobin] All clients disposed");
+        Log("[RoundRobin] Subscriptions and clients disposed");
 
-        // Finally wait for worker tasks to complete
-        Log("[RoundRobin] Waiting for worker tasks to complete (max 5 seconds)");
+        // Cancel to ensure all tasks exit
+        cts.Cancel();
+
+        // Wait for worker tasks to complete
         var allTasksTask = Task.WhenAll(workerTasks);
-        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5));
-        var drainResult = await Task.WhenAny(allTasksTask, timeoutTask).ConfigureAwait(false);
-        if (ReferenceEquals(drainResult, allTasksTask))
+        var drainCompleted = await Task.WhenAny(allTasksTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+        
+        if (ReferenceEquals(drainCompleted, allTasksTask))
         {
-            Log("[RoundRobin] Worker tasks drained successfully");
+            Log("[RoundRobin] All worker tasks completed successfully");
         }
         else
         {
-            Log("[RoundRobin] Worker tasks drain TIMEOUT after 5 seconds");
-            for (var i = 0; i < workerTasks.Count; i++)
-            {
-                Log($"[RoundRobin] Worker task {i} status: {workerTasks[i].Status}");
-            }
+            Log($"[RoundRobin] WARNING: Worker tasks did not complete within 2 seconds");
         }
-        
-        Log("[RoundRobin] Test method completed, manager will auto-dispose");
+        Log("[RoundRobin] Test completed");
     }
 
     private async Task WaitForRemoteWorkersAsync(PubSubManager manager, int expectedCount, CancellationToken token)
