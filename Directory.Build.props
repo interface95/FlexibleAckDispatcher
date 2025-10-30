@@ -1,4 +1,12 @@
 <Project>
+  <!-- Common compiler settings for all projects -->
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <!-- Common NuGet package metadata -->
   <PropertyGroup>
     <Authors>FlexibleAckDispatcher Team</Authors>
     <Company>FlexibleAckDispatcher</Company>
@@ -12,6 +20,7 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
+  <!-- Include README in all packages -->
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
