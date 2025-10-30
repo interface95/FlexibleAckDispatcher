@@ -4,8 +4,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions;
-using FlexibleAckDispatcher.InMemory;
-using FlexibleAckDispatcher.InMemory.Internal;
+using FlexibleAckDispatcher.InMemory.Core;
+using FlexibleAckDispatcher.InMemory.Core.Internal;
 
 namespace TestProject2;
 

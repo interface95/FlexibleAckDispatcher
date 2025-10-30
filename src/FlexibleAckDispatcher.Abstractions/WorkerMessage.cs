@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using FlexibleAckDispatcher.Abstractions.Internal;
 
 namespace FlexibleAckDispatcher.Abstractions;
 
@@ -42,16 +43,5 @@ public readonly struct WorkerMessage<T>
     public ValueTask AckAsync() => _context.AckAsync();
 
     internal IWorkerMessageContext Context => _context;
-}
-
-internal interface IWorkerMessageContext
-{
-    int WorkerId { get; }
-
-    long DeliveryTag { get; }
-
-    DateTimeOffset StartedAt { get; }
-
-    ValueTask AckAsync();
 }
 

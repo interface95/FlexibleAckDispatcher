@@ -5,7 +5,8 @@ using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions.Remote;
 using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
 using FlexibleAckDispatcher.GrpcServer.NamedPipe;
-using FlexibleAckDispatcher.InMemory;
+using FlexibleAckDispatcher.InMemory.Core;
+using FlexibleAckDispatcher.InMemory.Remote;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TestProject2;
@@ -50,8 +51,7 @@ public sealed class TestNamedPipeRemoteBridge
 
         var registerReply = await client.RegisterAsync(options =>
         {
-            options
-                .WithWorkerName("TestWorker")
+            options.WithWorkerName("TestWorker")
                 .WithConcurrencyLimit(1)
                 .WithPrefetch(1);
         }).WaitAsync(TestTimeout);

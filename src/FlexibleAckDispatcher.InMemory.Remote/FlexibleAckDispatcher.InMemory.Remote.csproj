@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FlexibleAckDispatcher.Abstractions\FlexibleAckDispatcher.Abstractions.csproj" />
+    <ProjectReference Include="..\FlexibleAckDispatcher.InMemory.Core\FlexibleAckDispatcher.InMemory.Core.csproj" />
+    <ProjectReference Include="..\FlexibleAckDispatcher.GrpcServer\FlexibleAckDispatcher.GrpcServer.csproj" />
+  </ItemGroup>
+
+</Project>
