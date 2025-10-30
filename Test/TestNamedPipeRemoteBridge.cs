@@ -75,11 +75,7 @@ public sealed class TestNamedPipeRemoteBridge
         Assert.AreEqual(envelope.MessageType, message.Task.MessageType);
         CollectionAssert.AreEqual(payload, message.Task.Payload.ToByteArray());
 
-        await client.AckAsync(options =>
-        {
-            options.WithWorkerId(workerId)
-                    .WithDeliveryTag(message.Task.DeliveryTag);
-        }).WaitAsync(TestTimeout);
+        await client.AckAsync(message.Task.DeliveryTag).WaitAsync(TestTimeout);
 
         var acknowledgement = await ackTcs.Task.WaitAsync(TestTimeout);
         Assert.AreEqual(workerId, acknowledgement.WorkerId);
@@ -129,12 +125,7 @@ public sealed class TestNamedPipeRemoteBridge
         var payloadText = Encoding.UTF8.GetString(message.Task.Payload.ToByteArray());
         StringAssert.Contains(payloadText, "hello-remote");
 
-        await client.AckAsync(options =>
-        {
-            options
-                .WithWorkerId(workerId)
-                .WithDeliveryTag(message.Task.DeliveryTag);
-        }).WaitAsync(TestTimeout);
+        await client.AckAsync(message.Task.DeliveryTag).WaitAsync(TestTimeout);
 
         Assert.IsTrue(SpinWait.SpinUntil(() => manager.CompletedCount >= 1, TestTimeout), "远程 Ack 未在期望时间内生效");
     }

@@ -395,9 +395,7 @@ public sealed class TestWorkerSelectionStrategies
                             }
                         }
 
-                        await client.AckAsync(opts =>
-                            opts.WithWorkerId(workerId)
-                                .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
+                        await client.AckAsync(message.Task.DeliveryTag, cts.Token).ConfigureAwait(false);
 
                         if (Volatile.Read(ref processed) >= totalMessages)
                         {
@@ -554,9 +552,7 @@ public sealed class TestWorkerSelectionStrategies
                             completion.TrySetResult();
                         }
 
-                        await client.AckAsync(opts =>
-                            opts.WithWorkerId(workerId)
-                                .WithDeliveryTag(message.Task.DeliveryTag), cts.Token).ConfigureAwait(false);
+                        await client.AckAsync(message.Task.DeliveryTag, cts.Token).ConfigureAwait(false);
 
                         if (Volatile.Read(ref processed) >= totalMessages)
                         {

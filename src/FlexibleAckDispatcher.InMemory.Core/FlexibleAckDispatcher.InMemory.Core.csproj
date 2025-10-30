@@ -6,7 +6,7 @@
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
     <IsPackable>true</IsPackable>
     <PackageId>FlexibleAckDispatcher.InMemory.Core</PackageId>
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>1.0.0-preview</VersionPrefix>
     <Description>High-performance in-memory pub/sub runtime with configurable workers, acknowledgements, and load balancing.</Description>
     <PackageTags>pubsub;dispatcher;worker;in-memory;ack</PackageTags>
   </PropertyGroup>

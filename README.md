@@ -309,9 +309,7 @@ try
 
         // TODO: 处理业务逻辑
 
-        await client.AckAsync(options =>
-            options.WithWorkerId(workerId)
-                   .WithDeliveryTag(message.Task.DeliveryTag));
+        await client.AckAsync(message.Task.DeliveryTag);
     }
 }
 finally
@@ -710,6 +708,6 @@ dotnet test
 ---
 
 **项目作者**: FlexibleAckDispatcher Team  
-**当前版本**: 1.0.0  
-**最后更新**: 2025-10-28
+**当前版本**: 1.0.0-preview  
+**最后更新**: 2025-10-30
 

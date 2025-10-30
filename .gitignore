@@ -11,3 +11,12 @@ nupkg/
 *.DotSettings.user
 .vs/
 .vscode/
+
+# Test results
+TestResults/
+**/TestResults/
+
+# Diagnostic logs
+*.log
+diag.*.log
+fail-diag.*.log

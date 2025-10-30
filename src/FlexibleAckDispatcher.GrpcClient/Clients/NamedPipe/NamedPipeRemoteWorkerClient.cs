@@ -20,7 +20,8 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
 
     private CancellationTokenSource? _heartbeatCts;
     private Task? _heartbeatTask;
-    private int _registeredWorkerId;
+    private int _heartbeatWorkerId;
+    private int _workerId;
 
     private NamedPipeRemoteWorkerClient(NamedPipeRemoteWorkerClientOptions options)
     {
@@ -59,6 +60,8 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
         var request = options.ToRequest();
         var reply = await _client.RegisterAsync(request, cancellationToken: cancellationToken).ResponseAsync.ConfigureAwait(false);
 
+        Volatile.Write(ref _workerId, reply.WorkerId);
+
         if (_autoHeartbeatEnabled)
         {
             StartAutoHeartbeat(reply.WorkerId);
@@ -88,13 +91,25 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
     /// </summary>
     /// <param name="configure">配置 ACK 请求的委托。</param>
     /// <param name="cancellationToken">取消操作。</param>
-    public Task AckAsync(Action<AckRequestOptions> configure, CancellationToken cancellationToken = default)
+    public Task AckAsync(long deliveryTag, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(configure);
-        var options = new AckRequestOptions();
-        configure(options);
-        options.Validate();
-        var request = options.ToRequest();
+        if (deliveryTag <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deliveryTag), "DeliveryTag 必须大于 0。");
+        }
+
+        var workerId = Volatile.Read(ref _workerId);
+        if (workerId <= 0)
+        {
+            throw new InvalidOperationException("尚未注册 Worker，无法发送 ACK。请先调用 RegisterAsync。");
+        }
+
+        var request = new AckRequest
+        {
+            DeliveryTag = deliveryTag,
+            WorkerId = workerId
+        };
+
         return _client.AckAsync(request, cancellationToken: cancellationToken).ResponseAsync;
     }
 
@@ -108,6 +123,7 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(configure);
         var options = new NackRequestOptions();
         configure(options);
+        EnsureWorkerId(options);
         options.Validate();
         var request = options.ToRequest();
         return _client.NackAsync(request, cancellationToken: cancellationToken).ResponseAsync;
@@ -123,6 +139,7 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(configure);
         var options = new HeartbeatRequestOptions();
         configure(options);
+        EnsureWorkerId(options);
         options.Validate();
         var request = options.ToRequest();
         return _client.HeartbeatAsync(request, cancellationToken: cancellationToken).ResponseAsync;
@@ -143,7 +160,7 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
             return;
         }
 
-        if (Interlocked.CompareExchange(ref _registeredWorkerId, workerId, 0) != 0)
+        if (Interlocked.CompareExchange(ref _heartbeatWorkerId, workerId, 0) != 0)
         {
             return;
         }
@@ -220,7 +237,35 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
         {
             cts.Dispose();
             _heartbeatTask = null;
-            Interlocked.Exchange(ref _registeredWorkerId, 0);
+            Interlocked.Exchange(ref _heartbeatWorkerId, 0);
+        }
+    }
+
+    private void EnsureWorkerId(NackRequestOptions options)
+    {
+        if (options.WorkerId > 0)
+        {
+            return;
+        }
+
+        var cached = Volatile.Read(ref _workerId);
+        if (cached > 0)
+        {
+            options.WithWorkerId(cached);
+        }
+    }
+
+    private void EnsureWorkerId(HeartbeatRequestOptions options)
+    {
+        if (options.WorkerId > 0)
+        {
+            return;
+        }
+
+        var cached = Volatile.Read(ref _workerId);
+        if (cached > 0)
+        {
+            options.WithWorkerId(cached);
         }
     }
 }
