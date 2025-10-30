@@ -15,12 +15,20 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
 {
     private readonly NamedPipeRemoteWorkerClientOptions _options;
     private readonly WorkerHub.WorkerHubClient _client;
+    private readonly TimeSpan _heartbeatInterval;
+    private readonly bool _autoHeartbeatEnabled;
+
+    private CancellationTokenSource? _heartbeatCts;
+    private Task? _heartbeatTask;
+    private int _registeredWorkerId;
 
     private NamedPipeRemoteWorkerClient(NamedPipeRemoteWorkerClientOptions options)
     {
         _options = options;
         var channel = new NamedPipeChannel(options.ServerName, options.PipeName);
         _client = new WorkerHub.WorkerHubClient(channel);
+        _autoHeartbeatEnabled = options.AutoHeartbeatEnabled;
+        _heartbeatInterval = options.HeartbeatInterval;
     }
 
     /// <summary>
@@ -42,14 +50,21 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
     /// <param name="configure">配置注册请求的委托。</param>
     /// <param name="cancellationToken">取消操作。</param>
     /// <returns>注册回复，其中包含 WorkerId。</returns>
-    public Task<RegisterReply> RegisterAsync(Action<RegisterRequestOptions> configure, CancellationToken cancellationToken = default)
+    public async Task<RegisterReply> RegisterAsync(Action<RegisterRequestOptions> configure, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(configure);
         var options = new RegisterRequestOptions();
         configure(options);
         options.Validate();
         var request = options.ToRequest();
-        return _client.RegisterAsync(request, cancellationToken: cancellationToken).ResponseAsync;
+        var reply = await _client.RegisterAsync(request, cancellationToken: cancellationToken).ResponseAsync.ConfigureAwait(false);
+
+        if (_autoHeartbeatEnabled)
+        {
+            StartAutoHeartbeat(reply.WorkerId);
+        }
+
+        return reply;
     }
 
     /// <summary>
@@ -116,8 +131,96 @@ public sealed class NamedPipeRemoteWorkerClient : IAsyncDisposable
     /// <summary>
     /// 异步释放客户端资源。
     /// </summary>
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        return ValueTask.CompletedTask;
+        await StopAutoHeartbeatAsync().ConfigureAwait(false);
+    }
+
+    private void StartAutoHeartbeat(int workerId)
+    {
+        if (workerId <= 0)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _registeredWorkerId, workerId, 0) != 0)
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        if (Interlocked.CompareExchange(ref _heartbeatCts, cts, null) != null)
+        {
+            cts.Dispose();
+            return;
+        }
+
+        _heartbeatTask = Task.Run(() => HeartbeatPumpAsync(workerId, cts.Token), cts.Token);
+    }
+
+    private async Task HeartbeatPumpAsync(int workerId, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                var request = new HeartbeatRequest
+                {
+                    WorkerId = workerId,
+                    Ticks = DateTimeOffset.UtcNow.Ticks
+                };
+
+                await _client.HeartbeatAsync(request, cancellationToken: token).ResponseAsync.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch
+            {
+                // 忽略瞬时异常，留待下次心跳重试。
+            }
+
+            try
+            {
+                await Task.Delay(_heartbeatInterval, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private async ValueTask StopAutoHeartbeatAsync()
+    {
+        var cts = Interlocked.Exchange(ref _heartbeatCts, null);
+        if (cts is null)
+        {
+            return;
+        }
+
+        cts.Cancel();
+
+        try
+        {
+            if (_heartbeatTask is not null)
+            {
+                await _heartbeatTask.ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            cts.Dispose();
+            _heartbeatTask = null;
+            Interlocked.Exchange(ref _registeredWorkerId, 0);
+        }
     }
 }
