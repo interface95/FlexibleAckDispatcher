@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using InMemoryWorkerBalancer;
-using InMemoryWorkerBalancer.Abstractions;
+using FlexibleAckDispatcher.Abstractions;
+using FlexibleAckDispatcher.InMemory.Core;
 
 namespace TestProject2;
 
