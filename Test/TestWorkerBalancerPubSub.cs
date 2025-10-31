@@ -335,8 +335,8 @@ public sealed class TestWorkerBalancerPubSub
     {
         await using var manager = PubSubManager.Create();
     
-        const int subscriberCount = 3;
-        const int totalMessages = 30;
+        const int subscriberCount = 50;
+        const int totalMessages = 500;
     
         var delivered = new ConcurrentDictionary<int, ConcurrentBag<int>>();
         var processed = 0;
@@ -358,7 +358,7 @@ public sealed class TestWorkerBalancerPubSub
         var subscriptions = new List<IPubSubSubscription>(subscriberCount);
         for (var i = 0; i < subscriberCount; i++)
         {
-            subscriptions.Add(await manager.SubscribeAsync<int>(Handler, options => options.WithPrefetch(2)));
+            subscriptions.Add(await manager.SubscribeAsync<int>(Handler, options => options.WithPrefetch(2000)));
         }
     
         for (var i = 0; i < totalMessages; i++)
