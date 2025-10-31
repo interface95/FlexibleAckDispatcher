@@ -39,16 +39,10 @@ internal sealed class WorkerTaskRunner : IWorkerTaskRunner
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        return ProcessAsync(cancellationToken);
-        //return Task.Run(() => ProcessAsync(cancellationToken), CancellationToken.None);
-        return Task.Factory.StartNew(
-                () => ProcessAsync(cancellationToken),
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default).Unwrap();
+        return PumpAsync(cancellationToken);
     }
 
-    private async Task ProcessAsync(CancellationToken cancellationToken)
+    private async Task PumpAsync(CancellationToken cancellationToken)
     {
         try
         {

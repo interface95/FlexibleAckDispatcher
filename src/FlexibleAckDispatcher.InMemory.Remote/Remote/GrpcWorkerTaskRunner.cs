@@ -53,7 +53,7 @@ internal sealed class GrpcWorkerTaskRunner : IWorkerTaskRunner
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        return Task.Run(() => PumpAsync(cancellationToken), cancellationToken);
+        return PumpAsync(cancellationToken);
     }
 
     private async Task PumpAsync(CancellationToken cancellationToken)

@@ -35,12 +35,6 @@ internal sealed class WorkerProcessor
 
     public void Start()
     {
-        // var runningTask = Task.Factory.StartNew(
-        //     () => RunWorkerPoolAsync(_endpoint.Cancellation.Token),
-        //     CancellationToken.None,
-        //     TaskCreationOptions.LongRunning,
-        //     TaskScheduler.Default).Unwrap();
-
         var runningTask = RunWorkerPoolAsync(_endpoint.Cancellation.Token);
         
         _endpoint.SetRunningTask(runningTask);
