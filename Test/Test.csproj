@@ -18,8 +18,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\src\FlexibleAckDispatcher.InMemory.Core\FlexibleAckDispatcher.InMemory.Core.csproj" />
-      <ProjectReference Include="..\src\FlexibleAckDispatcher.InMemory.Remote\FlexibleAckDispatcher.InMemory.Remote.csproj" />
+      <ProjectReference Include="..\src\FlexibleAckDispatcher.InMemory\FlexibleAckDispatcher.InMemory.csproj" />
+      <ProjectReference Include="..\src\FlexibleAckDispatcher.Remote\FlexibleAckDispatcher.Remote.csproj" />
       <ProjectReference Include="..\src\FlexibleAckDispatcher.GrpcClient\FlexibleAckDispatcher.GrpcClient.csproj" />
       <ProjectReference Include="..\src\FlexibleAckDispatcher.GrpcServer\FlexibleAckDispatcher.GrpcServer.csproj" />
       <ProjectReference Include="..\src\InMemoryWorkerBalancer\InMemoryWorkerBalancer.csproj" />

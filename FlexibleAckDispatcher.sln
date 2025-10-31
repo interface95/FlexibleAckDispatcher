@@ -10,9 +10,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.GrpcS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.GrpcClient", "src\FlexibleAckDispatcher.GrpcClient\FlexibleAckDispatcher.GrpcClient.csproj", "{23A16476-3719-45F5-8B1B-BF0E3DE6ACD2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.InMemory.Core", "src\FlexibleAckDispatcher.InMemory.Core\FlexibleAckDispatcher.InMemory.Core.csproj", "{59EA477C-9031-4A56-9E1E-B5AC2A3A6DD9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.InMemory", "src\FlexibleAckDispatcher.InMemory\FlexibleAckDispatcher.InMemory.csproj", "{59EA477C-9031-4A56-9E1E-B5AC2A3A6DD9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.InMemory.Remote", "src\FlexibleAckDispatcher.InMemory.Remote\FlexibleAckDispatcher.InMemory.Remote.csproj", "{E5095365-5D3D-4169-9096-7454B672765C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.Remote", "src\FlexibleAckDispatcher.Remote\FlexibleAckDispatcher.Remote.csproj", "{E5095365-5D3D-4169-9096-7454B672765C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FlexibleAckDispatcher.GrpcContracts", "src\FlexibleAckDispatcher.GrpcContracts\FlexibleAckDispatcher.GrpcContracts.csproj", "{1D69DD64-3A44-4A2D-A81E-E70714E91847}"
 EndProject

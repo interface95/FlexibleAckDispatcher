@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions;
-using FlexibleAckDispatcher.InMemory.Core;
+using FlexibleAckDispatcher.InMemory;
 
 namespace TestProject2;
 

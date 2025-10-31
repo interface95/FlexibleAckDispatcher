@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>FlexibleAckDispatcher.Remote</PackageId>
+    <VersionPrefix>1.0.0-preview</VersionPrefix>
+    <Description>Remote worker bridge modules for FlexibleAckDispatcher, featuring NamedPipe + gRPC integration.</Description>
+    <PackageTags>pubsub;dispatcher;worker;grpc;namedpipe;remote</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FlexibleAckDispatcher.Abstractions\FlexibleAckDispatcher.Abstractions.csproj" />
+    <ProjectReference Include="..\FlexibleAckDispatcher.InMemory\FlexibleAckDispatcher.InMemory.csproj" />
+    <ProjectReference Include="..\FlexibleAckDispatcher.GrpcServer\FlexibleAckDispatcher.GrpcServer.csproj" />
+  </ItemGroup>
+
+</Project>

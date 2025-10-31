@@ -10,9 +10,9 @@ using FlexibleAckDispatcher.Abstractions;
 using FlexibleAckDispatcher.Abstractions.Remote;
 using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
 using FlexibleAckDispatcher.GrpcServer.Protos;
-using FlexibleAckDispatcher.InMemory.Core;
-using FlexibleAckDispatcher.InMemory.Core.Internal;
-using FlexibleAckDispatcher.InMemory.Remote;
+using FlexibleAckDispatcher.InMemory;
+using FlexibleAckDispatcher.InMemory.Internal;
+using FlexibleAckDispatcher.Remote;
 using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 

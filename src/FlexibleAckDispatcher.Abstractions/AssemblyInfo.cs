@@ -1,3 +1,3 @@
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FlexibleAckDispatcher.InMemory.Core")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FlexibleAckDispatcher.InMemory.Remote")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FlexibleAckDispatcher.InMemory")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("FlexibleAckDispatcher.Remote")]
 

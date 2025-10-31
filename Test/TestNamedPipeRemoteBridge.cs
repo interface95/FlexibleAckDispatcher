@@ -5,8 +5,8 @@ using System.Threading.Tasks;
 using FlexibleAckDispatcher.Abstractions.Remote;
 using FlexibleAckDispatcher.GrpcClient.Clients.NamedPipe;
 using FlexibleAckDispatcher.GrpcServer.NamedPipe;
-using FlexibleAckDispatcher.InMemory.Core;
-using FlexibleAckDispatcher.InMemory.Remote;
+using FlexibleAckDispatcher.InMemory;
+using FlexibleAckDispatcher.Remote;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TestProject2;
