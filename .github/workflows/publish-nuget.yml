@@ -18,8 +18,8 @@ env:
     src/FlexibleAckDispatcher.GrpcContracts/FlexibleAckDispatcher.GrpcContracts.csproj
     src/FlexibleAckDispatcher.GrpcServer/FlexibleAckDispatcher.GrpcServer.csproj
     src/FlexibleAckDispatcher.GrpcClient/FlexibleAckDispatcher.GrpcClient.csproj
-    src/FlexibleAckDispatcher.InMemory.Core/FlexibleAckDispatcher.InMemory.Core.csproj
-    src/FlexibleAckDispatcher.InMemory.Remote/FlexibleAckDispatcher.InMemory.Remote.csproj
+    src/FlexibleAckDispatcher.InMemory/FlexibleAckDispatcher.InMemory.csproj
+    src/FlexibleAckDispatcher.Remote/FlexibleAckDispatcher.Remote.csproj
 
 jobs:
   publish:
