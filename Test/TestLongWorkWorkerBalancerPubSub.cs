@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using FlexibleAckDispatcher.Abstractions;
-using FlexibleAckDispatcher.InMemory.Core;
+using InMemoryWorkerBalancer;
+using InMemoryWorkerBalancer.Abstractions;
 
 namespace TestProject2;
 

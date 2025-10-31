@@ -96,7 +96,7 @@ public sealed class TestWorkerSelectionStrategies
         var processed = 0;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        async Task Handler(WorkerMessage<int> message, CancellationToken cancellationToken)
+        async Task Handler(FlexibleAckDispatcher.Abstractions.WorkerMessage<int> message, CancellationToken cancellationToken)
         {
             workerMessageCounts.AddOrUpdate(message.WorkerId, 1, (_, count) => count + 1);
 
@@ -255,7 +255,7 @@ public sealed class TestWorkerSelectionStrategies
         var processed = 0;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        async Task Handler(WorkerMessage<int> message, CancellationToken cancellationToken)
+        async Task Handler(FlexibleAckDispatcher.Abstractions.WorkerMessage<int> message, CancellationToken cancellationToken)
         {
             await Task.Delay(10, cancellationToken);
             if (Interlocked.Increment(ref processed) == 30)
