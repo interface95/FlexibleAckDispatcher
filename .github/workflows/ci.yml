@@ -60,43 +60,43 @@ jobs:
         path: '**/test-results.trx'
         retention-days: 7
 
-  pack:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+#  pack:
+#    runs-on: ubuntu-latest
+#    needs: build-and-test
+#    
+#    steps:
+#    - name: Checkout repository
+#      uses: actions/checkout@v4
+#
+#    - name: Setup .NET
+#      uses: actions/setup-dotnet@v4
+#      with:
+#        dotnet-version: ${{ env.DOTNET_VERSION }}
+#
+#    - name: Restore dependencies
+#      run: dotnet restore ${{ env.SOLUTION_FILE }}
+#
+#    - name: Build
+#      run: dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
-
-    - name: Restore dependencies
-      run: dotnet restore ${{ env.SOLUTION_FILE }}
-
-    - name: Build
-      run: dotnet build ${{ env.SOLUTION_FILE }} --configuration Release --no-restore
-
-    - name: Pack (preview)
-      run: |
-        mkdir -p ./nupkg
-        VERSION=${{ env.PREVIEW_VERSION_PREFIX }}.${{ github.run_number }}
-        echo "Packing preview packages (${VERSION})"
-        while IFS= read -r project; do
-          echo " - $project"
-          dotnet pack "$project" \
-            --configuration Release \
-            --no-build \
-            --output ./nupkg \
-            /p:PackageVersion=${VERSION}
-        done <<< "${{ env.PROJECTS }}"
-
-    - name: Upload package artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: nuget-preview-package
-        path: ./nupkg/*.nupkg
-        retention-days: 7
+#    - name: Pack (preview)
+#      run: |
+#        mkdir -p ./nupkg
+#        VERSION=${{ env.PREVIEW_VERSION_PREFIX }}.${{ github.run_number }}
+#        echo "Packing preview packages (${VERSION})"
+#        while IFS= read -r project; do
+#          echo " - $project"
+#          dotnet pack "$project" \
+#            --configuration Release \
+#            --no-build \
+#            --output ./nupkg \
+#            /p:PackageVersion=${VERSION}
+#        done <<< "${{ env.PROJECTS }}"
+#
+#    - name: Upload package artifact
+#      uses: actions/upload-artifact@v4
+#      with:
+#        name: nuget-preview-package
+#        path: ./nupkg/*.nupkg
+#        retention-days: 7
 
