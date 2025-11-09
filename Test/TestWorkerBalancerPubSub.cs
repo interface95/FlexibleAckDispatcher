@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,6 +48,75 @@ public sealed class TestWorkerBalancerPubSub
 
         Assert.AreSame(completion.Task, finishedTask, "消息未在预期时间内全部处理");
         Assert.AreEqual(totalMessages, processed);
+    }
+
+    [TestMethod]
+    /// <summary>
+    /// 验证未 Ack 的消息数量不会超过 Prefetch 限制。
+    /// </summary>
+    public async Task PubSubManager_ShouldLimitUnackedMessagesToPrefetch()
+    {
+        const int prefetch = 5;
+        const int totalMessages = 10;
+
+        await using var manager = PubSubManager.Create();
+
+        var processed = 0;
+        var deliveries = new SemaphoreSlim(0);
+        var tags = new ConcurrentQueue<long>();
+
+        async Task Handler(WorkerMessage<int> message, CancellationToken cancellationToken)
+        {
+            tags.Enqueue(message.DeliveryTag);
+            Interlocked.Increment(ref processed);
+            deliveries.Release();
+        }
+
+        await manager.SubscribeAsync<int>(
+            Handler,
+            options => options.WithPrefetch(prefetch).WithConcurrencyLimit(1));
+
+        for (var i = 0; i < totalMessages; i++)
+        {
+            await manager.PublishAsync(i);
+        }
+
+        for (var i = 0; i < prefetch; i++)
+        {
+            Assert.IsTrue(
+                await deliveries.WaitAsync(TimeSpan.FromSeconds(1)),
+                $"第 {i + 1} 条消息未及时处理");
+        }
+
+        Assert.IsFalse(
+            await deliveries.WaitAsync(TimeSpan.FromMilliseconds(200)),
+            "处理器在未确认的情况下不应继续处理超过 Prefetch 的消息");
+
+        Assert.AreEqual(prefetch, Volatile.Read(ref processed), "未确认的消息数量应受 Prefetch 限制");
+
+        var firstBatch = new List<long>();
+        for (var i = 0; i < prefetch; i++)
+        {
+            Assert.IsTrue(tags.TryDequeue(out var tag), "未找到需要确认的 deliveryTag");
+            firstBatch.Add(tag);
+        }
+
+        foreach (var tag in firstBatch)
+        {
+            await manager.AckAsync(tag);
+        }
+
+        for (var i = prefetch; i < totalMessages; i++)
+        {
+            Assert.IsTrue(
+                await deliveries.WaitAsync(TimeSpan.FromSeconds(1)),
+                $"第 {i + 1} 条消息在释放 Prefetch 槽位后未及时处理");
+
+            Assert.IsTrue(tags.TryDequeue(out var tag), "未捕获后续消息的 deliveryTag");
+            await manager.AckAsync(tag);
+        }
+
+        Assert.AreEqual(totalMessages, Volatile.Read(ref processed), "释放 Prefetch 槽位后应处理全部消息");
     }
 
     [TestMethod]

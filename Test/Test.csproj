@@ -22,7 +22,6 @@
       <ProjectReference Include="..\src\FlexibleAckDispatcher.Remote\FlexibleAckDispatcher.Remote.csproj" />
       <ProjectReference Include="..\src\FlexibleAckDispatcher.GrpcClient\FlexibleAckDispatcher.GrpcClient.csproj" />
       <ProjectReference Include="..\src\FlexibleAckDispatcher.GrpcServer\FlexibleAckDispatcher.GrpcServer.csproj" />
-      <ProjectReference Include="..\src\InMemoryWorkerBalancer\InMemoryWorkerBalancer.csproj" />
     </ItemGroup>
 
 </Project>

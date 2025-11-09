@@ -133,8 +133,9 @@ internal sealed class WorkerManager
         });
 
         var capacity = new WorkerCapacity(options.ConcurrencyLimit);
+        var prefetchWindow = new WorkerCapacity(options.Prefetch);
         var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_globalToken);
-        var endpoint = new WorkerEndpoint(workerId, channel, linkedCts, capacity)
+        var endpoint = new WorkerEndpoint(workerId, channel, linkedCts, capacity, prefetchWindow)
         {
             Name = options.Name,
             HandlerTimeout = options.HandlerTimeout,
@@ -156,15 +157,32 @@ internal sealed class WorkerManager
         ReadOnlyMemory<byte> payload,
         CancellationToken cancellationToken)
     {
-        await endpoint.Capacity.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await endpoint.PrefetchWindow.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await endpoint.Capacity.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            endpoint.PrefetchWindow.Release();
+            throw;
+        }
 
         var deliveryTag = SnowflakeIdGenerator.NextId();
-        var token = new WorkerAckToken(endpoint.Id, deliveryTag, payload, () =>
-        {
-            endpoint.Capacity.Release();
-            ReleaseWorker(endpoint);
-            _logger.LogDebug("Worker {WorkerId} released slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
-        });
+        var token = new WorkerAckToken(
+            endpoint.Id,
+            deliveryTag,
+            payload,
+            () =>
+            {
+                endpoint.Capacity.Release();
+                ReleaseWorker(endpoint);
+                _logger.LogDebug("Worker {WorkerId} released slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
+            },
+            () =>
+            {
+                endpoint.PrefetchWindow.Release();
+            });
         _inFlight[deliveryTag] = token;
         _logger.LogDebug("Worker {WorkerId} acquired slot for deliveryTag {DeliveryTag}", endpoint.Id, deliveryTag);
         Interlocked.Increment(ref _dispatchedCount);
@@ -258,6 +276,7 @@ internal sealed class WorkerManager
 
         endpoint.Cancellation.Dispose();
         endpoint.Capacity.Dispose();
+        endpoint.PrefetchWindow.Dispose();
 
         await RaiseWorkerRemovedAsync(endpoint).ConfigureAwait(false);
         _logger.LogDebug("Worker {WorkerId} removed", endpoint.Id);
@@ -489,6 +508,7 @@ internal sealed class WorkerManager
         {
             endpoint.Cancellation.Dispose();
             endpoint.Capacity.Dispose();
+            endpoint.PrefetchWindow.Dispose();
         }
 
         _selectionStrategy.Dispose();

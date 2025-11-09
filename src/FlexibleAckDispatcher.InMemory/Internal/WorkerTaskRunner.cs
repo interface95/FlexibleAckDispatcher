@@ -51,20 +51,21 @@ internal sealed class WorkerTaskRunner : IWorkerTaskRunner
                 while (!_isStopped && _reader.TryRead(out var payload))
                 {
                     WorkerAckToken? token = null;
+                    var shouldMonitorAck = false;
                     try
                     {
                         _currentTaskStartedAt = DateTimeOffset.UtcNow;
-                        token = await _workerManager.RegisterInFlightAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
-                        _workerManager.Logger.LogDebug("Worker {WorkerId} handling deliveryTag {DeliveryTag}", _endpoint.Id, token.DeliveryTag);
+                        token = await _workerManager.RegisterInFlightAsync(_endpoint, payload, cancellationToken)
+                            .ConfigureAwait(false);
+                        _workerManager.Logger.LogDebug("Worker {WorkerId} handling deliveryTag {DeliveryTag}",
+                            _endpoint.Id, token.DeliveryTag);
 
                         await ExecuteWithTimeoutAsync(token, cancellationToken).ConfigureAwait(false);
-                        _workerManager.RegisterAckTimeout(_endpoint, token);
-                        _currentTaskStartedAt = default;
+                        shouldMonitorAck = true;
                     }
                     catch (Exception ex)
                     {
                         HandleFailure();
-                        _currentTaskStartedAt = default;
 
                         if (token is not null)
                         {
@@ -74,15 +75,27 @@ internal sealed class WorkerTaskRunner : IWorkerTaskRunner
                         {
                             try
                             {
-                                await _workerManager.ReturnPayloadAsync(_endpoint, payload, cancellationToken).ConfigureAwait(false);
+                                await _workerManager.ReturnPayloadAsync(_endpoint, payload, cancellationToken)
+                                    .ConfigureAwait(false);
                             }
                             catch (ChannelClosedException)
                             {
-                                _workerManager.Logger.LogWarning("Worker {WorkerId} channel closed while returning payload", _endpoint.Id);
+                                _workerManager.Logger.LogWarning(
+                                    "Worker {WorkerId} channel closed while returning payload", _endpoint.Id);
                             }
                         }
 
                         _workerManager.Logger.LogError(ex, "Worker {WorkerId} handling failed", _endpoint.Id);
+                    }
+                    finally
+                    {
+                        token?.ReleaseProcessingSlot();
+                        _currentTaskStartedAt = default;
+                    }
+
+                    if (token is not null && shouldMonitorAck && !token.IsAcknowledged)
+                    {
+                        _workerManager.RegisterAckTimeout(_endpoint, token);
                     }
                 }
             }
@@ -100,14 +113,16 @@ internal sealed class WorkerTaskRunner : IWorkerTaskRunner
 
     private async Task ExecuteWithTimeoutAsync(WorkerAckToken token, CancellationToken outerCancellationToken)
     {
-        using var scope = ReusableTimeoutScope.Rent(outerCancellationToken, _endpoint.HandlerTimeout, out var linkedToken);
+        using var scope =
+            ReusableTimeoutScope.Rent(outerCancellationToken, _endpoint.HandlerTimeout, out var linkedToken);
 
         try
         {
             var context = new WorkerDeliveryContext(token, _workerManager.TryAck, _currentTaskStartedAt);
             await _handler(context, linkedToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!outerCancellationToken.IsCancellationRequested && linkedToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!outerCancellationToken.IsCancellationRequested &&
+                                                 linkedToken.IsCancellationRequested)
         {
             _workerManager.Logger.LogWarning(
                 "Worker {WorkerId} handling deliveryTag {DeliveryTag} timed out after {Timeout}.",

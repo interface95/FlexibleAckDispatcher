@@ -10,12 +10,18 @@ internal sealed class WorkerEndpoint
 {
     private Task? _runningTask;
 
-    public WorkerEndpoint(int id, Channel<ReadOnlyMemory<byte>> channel, CancellationTokenSource cancellation, WorkerCapacity capacity)
+    public WorkerEndpoint(
+        int id,
+        Channel<ReadOnlyMemory<byte>> channel,
+        CancellationTokenSource cancellation,
+        WorkerCapacity capacity,
+        WorkerCapacity prefetchWindow)
     {
         Id = id;
         Channel = channel;
         Cancellation = cancellation;
         Capacity = capacity;
+        PrefetchWindow = prefetchWindow;
     }
 
     /// <summary>
@@ -42,6 +48,11 @@ internal sealed class WorkerEndpoint
     /// Worker 的并发容量控制器，限制同一时间执行的消息数量。
     /// </summary>
     public WorkerCapacity Capacity { get; }
+
+    /// <summary>
+    /// 控制未确认消息窗口，限制在 Ack 之前允许的最大数量。
+    /// </summary>
+    public WorkerCapacity PrefetchWindow { get; }
 
     /// <summary>
     /// Worker 是否仍处于活跃状态；调度器会过滤不活跃的 Worker。

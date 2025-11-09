@@ -5,8 +5,11 @@ namespace FlexibleAckDispatcher.InMemory.Internal;
 /// </summary>
 internal sealed class WorkerAckToken
 {
-    private readonly Action _release;
+    private readonly Action _processingRelease;
+    private readonly Action _ackRelease;
     private int _state;
+    private int _processingReleased;
+    private int _ackReleased;
 
     private enum TokenState
     {
@@ -18,12 +21,18 @@ internal sealed class WorkerAckToken
     /// <summary>
     /// 构造一个新的 Ack token。
     /// </summary>
-    public WorkerAckToken(int workerId, long deliveryTag, ReadOnlyMemory<byte> payload, Action release)
+    public WorkerAckToken(
+        int workerId,
+        long deliveryTag,
+        ReadOnlyMemory<byte> payload,
+        Action processingRelease,
+        Action ackRelease)
     {
         WorkerId = workerId;
         DeliveryTag = deliveryTag;
         Payload = payload;
-        _release = release;
+        _processingRelease = processingRelease;
+        _ackRelease = ackRelease;
     }
 
     /// <summary>
@@ -51,13 +60,26 @@ internal sealed class WorkerAckToken
     /// </summary>
     public bool TryAck()
     {
-        if (Interlocked.CompareExchange(ref _state, (int)TokenState.Acknowledged, (int)TokenState.Pending) != (int)TokenState.Pending)
+        var result = Interlocked.CompareExchange(ref _state, (int)TokenState.Acknowledged, (int)TokenState.Pending) ==
+                     (int)TokenState.Pending;
+
+        if (result)
         {
-            return false;
+            ReleaseAckSlot();
         }
 
-        _release();
-        return true;
+        return result;
+    }
+
+    /// <summary>
+    /// 在处理完成后释放并发槽位。
+    /// </summary>
+    public void ReleaseProcessingSlot()
+    {
+        if (Interlocked.Exchange(ref _processingReleased, 1) == 0)
+        {
+            _processingRelease();
+        }
     }
 
     /// <summary>
@@ -65,9 +87,18 @@ internal sealed class WorkerAckToken
     /// </summary>
     public void ForceRelease()
     {
-        if (Interlocked.Exchange(ref _state, (int)TokenState.Released) == (int)TokenState.Pending)
+        var previous = Interlocked.Exchange(ref _state, (int)TokenState.Released);
+        if (previous == (int)TokenState.Pending)
         {
-            _release();
+            ReleaseAckSlot();
+        }
+    }
+
+    private void ReleaseAckSlot()
+    {
+        if (Interlocked.Exchange(ref _ackReleased, 1) == 0)
+        {
+            _ackRelease();
         }
     }
 }
