@@ -155,6 +155,7 @@ internal sealed class GrpcWorkerTaskRunner : IWorkerTaskRunner
         }
         finally
         {
+            token?.ReleaseProcessingSlot();
             _currentTaskStartedAt = default;
         }
     }
