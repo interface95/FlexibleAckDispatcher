@@ -313,6 +313,8 @@ public sealed class TestWorkerSelectionStrategies
     /// </summary>
     public async Task GrpcRemoteWorkers_ShouldDistributeHighLoad()
     {
+        SkipIfNamedPipeUnsupported();
+
         const int workerCount = 4;
         const int totalMessages = 48;
         var pipeName = $"test-pipe-{Guid.NewGuid():N}";
@@ -489,6 +491,8 @@ public sealed class TestWorkerSelectionStrategies
     /// </summary>
     public async Task GrpcRemoteWorkers_ShouldBalanceWithRoundRobin()
     {
+        SkipIfNamedPipeUnsupported();
+
         const int workerCount = 3;
         const int totalMessages = 48;
         var pipeName = $"test-pipe-{Guid.NewGuid():N}";
@@ -636,6 +640,14 @@ public sealed class TestWorkerSelectionStrategies
             Log($"[RoundRobin] WARNING: Worker tasks did not complete within 2 seconds");
         }
         Log("[RoundRobin] Test completed");
+    }
+
+    private static void SkipIfNamedPipeUnsupported()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Named pipe based remote worker tests currently require Windows.");
+        }
     }
 
     private async Task WaitForRemoteWorkersAsync(PubSubManager manager, int expectedCount, CancellationToken token)
